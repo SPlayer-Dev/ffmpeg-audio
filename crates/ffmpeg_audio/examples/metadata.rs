@@ -1,0 +1,64 @@
+use std::{
+    env,
+    fs::File,
+    path::Path,
+};
+
+use ffmpeg_audio::AudioReader;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!("用法: {} <音频文件路径>", args[0]);
+        eprintln!("示例: {} ./test_audio.m4a", args[0]);
+        std::process::exit(1);
+    }
+    let file_path = &args[1];
+
+    let file = File::open(file_path)?;
+    let reader = AudioReader::new(file, 48000, 2)?;
+
+    let info = reader.source_info();
+    println!("编码器:   {}", info.codec_name);
+    println!("采样格式: {}", info.sample_fmt);
+    println!("采样率:   {} Hz", info.sample_rate);
+    println!("声道数:   {}", info.channels);
+    println!("码率:     {} kbps", info.bit_rate / 1000);
+
+    println!("\n=== 音频元数据 ===");
+    let metadata = reader.metadata();
+    if metadata.is_empty() {
+        println!("(未找到任何元数据标签)");
+    } else {
+        for key in metadata.keys() {
+            println!("{} : {}", key, metadata[key]);
+        }
+    }
+
+    if let Some(cover) = reader.cover() {
+        let extension = match cover.mime_type.as_deref() {
+            Some("image/jpeg") => "jpg",
+            Some("image/png") => "png",
+            Some("image/bmp") => "bmp",
+            Some("image/gif") => "gif",
+            _ => "bin",
+        };
+
+        let base_name = Path::new(file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("audio");
+
+        let out_filename = format!("{base_name}_cover.{extension}");
+
+        println!(
+            "封面图片 MIME 类型: {}",
+            cover.mime_type.as_deref().unwrap_or("unknown")
+        );
+
+        std::fs::write(&out_filename, cover.data)?;
+        println!("保存封面至: ./{out_filename}");
+    }
+
+    Ok(())
+}
