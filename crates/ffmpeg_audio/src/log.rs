@@ -1,8 +1,19 @@
 use std::sync::Once;
 
+use ffmpeg_audio_sys::LogLevel;
+
 use crate::sys;
 
 static INIT_LOGGING: Once = Once::new();
+
+/// Set the log level for FFmpeg
+pub fn set_log_level(level: LogLevel) {
+    init_ffmpeg_logging();
+
+    unsafe {
+        sys::av_log_set_level(level.into());
+    }
+}
 
 pub fn init_ffmpeg_logging() {
     INIT_LOGGING.call_once(|| unsafe {
