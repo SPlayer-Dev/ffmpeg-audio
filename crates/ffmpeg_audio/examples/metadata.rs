@@ -19,8 +19,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = AudioReader::new(file, 48000, 2)?;
 
     let info = reader.source_info();
-    println!("编码器:   {}", info.codec_name);
-    println!("采样格式: {}", info.sample_fmt);
+    println!(
+        "编码器:   {}",
+        info.codec_name.as_deref().unwrap_or("unknown")
+    );
+    println!(
+        "采样格式: {}",
+        info.sample_fmt.as_deref().unwrap_or("unknown")
+    );
     println!("采样率:   {} Hz", info.sample_rate);
     println!("声道数:   {}", info.channels);
     println!("码率:     {} kbps", info.bit_rate / 1000);

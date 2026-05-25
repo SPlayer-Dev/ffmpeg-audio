@@ -45,10 +45,10 @@ pub struct SourceAudioInfo {
     pub bit_rate: i64,
 
     /// Audio sample format.
-    pub sample_fmt: String,
+    pub sample_fmt: Option<String>,
 
     /// The name of a codec.
-    pub codec_name: String,
+    pub codec_name: Option<String>,
 
     /// This is the number of valid bits in each output sample.
     ///
@@ -105,19 +105,21 @@ impl AudioReader {
             let codec_id = (*codec_params).codec_id;
             let codec_name_ptr = sys::avcodec_get_name(codec_id);
             let codec_name = if codec_name_ptr.is_null() {
-                "unknown".to_string()
+                None
             } else {
-                CStr::from_ptr(codec_name_ptr)
-                    .to_string_lossy()
-                    .into_owned()
+                Some(
+                    CStr::from_ptr(codec_name_ptr)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
             };
 
             let src_sample_fmt = decoder.sample_fmt();
             let fmt_name_ptr = sys::av_get_sample_fmt_name(src_sample_fmt);
             let sample_fmt_str = if fmt_name_ptr.is_null() {
-                "unknown".to_string()
+                None
             } else {
-                CStr::from_ptr(fmt_name_ptr).to_string_lossy().into_owned()
+                Some(CStr::from_ptr(fmt_name_ptr).to_string_lossy().into_owned())
             };
 
             let stream_bit_rate = (*codec_params).bit_rate;

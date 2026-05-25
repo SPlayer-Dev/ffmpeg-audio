@@ -61,7 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let info = reader.source_info();
     println!(
         "📄 源文件信息: {} ({} Hz, {} 声道)",
-        info.codec_name, info.sample_rate, info.channels
+        info.codec_name.as_deref().unwrap_or("unknown"),
+        info.sample_rate,
+        info.channels
     );
 
     let buffer_capacity = (sample_rate * u32::from(channels) * 4) as usize;
