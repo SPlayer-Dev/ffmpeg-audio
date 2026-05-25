@@ -72,6 +72,9 @@ pub struct AudioReader {
     audio_buffer: Vec<f32>,
     is_exhausted: bool,
 
+    time_base: sys::AVRational,
+    current_pts: Option<Duration>,
+
     source_info: SourceAudioInfo,
 }
 
@@ -100,6 +103,8 @@ impl AudioReader {
             target_sample_rate,
             sys::AVSampleFormat_AV_SAMPLE_FMT_FLT,
         )?;
+
+        let time_base = demuxer.time_base()?;
 
         let source_info = unsafe {
             let codec_id = (*codec_params).codec_id;
@@ -153,8 +158,15 @@ impl AudioReader {
             demuxer,
             audio_buffer: Vec::with_capacity(4096 * target_channels as usize),
             is_exhausted: false,
+            time_base,
+            current_pts: None,
             source_info,
         })
+    }
+
+    #[must_use]
+    pub const fn current_playback_time(&self) -> Option<Duration> {
+        self.current_pts
     }
 
     #[must_use]
@@ -183,6 +195,7 @@ impl AudioReader {
         self.resampler.flush()?;
         self.audio_buffer.clear();
         self.is_exhausted = false;
+        self.current_pts = None;
 
         Ok(())
     }
@@ -195,6 +208,19 @@ impl AudioReader {
         loop {
             match self.decoder.receive_frame() {
                 Ok(Some(frame)) => {
+                    unsafe {
+                        let pts = (*frame).pts;
+                        if pts != sys::AV_NOPTS_VALUE {
+                            let bq = sys::AVRational {
+                                num: 1,
+                                den: sys::AV_TIME_BASE.cast_signed(),
+                            };
+                            let us = sys::av_rescale_q(pts, self.time_base, bq);
+                            self.current_pts =
+                                Some(Duration::from_micros(us.max(0).cast_unsigned()));
+                        }
+                    }
+
                     self.resampler
                         .convert_and_fill(Some(frame), &mut self.audio_buffer)?;
 

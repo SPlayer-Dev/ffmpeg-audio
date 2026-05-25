@@ -86,10 +86,7 @@ fn test_audio_duration() {
     let reader = AudioReader::new(source, 48000, 2).unwrap();
     let duration = reader.duration().expect("应能拿到 WAV 时长");
     let secs = duration.as_secs_f64();
-    assert!(
-        (1.99..=2.01).contains(&secs),
-        "时长应约为 2s，实际 {secs}"
-    );
+    assert!((1.99..=2.01).contains(&secs), "时长应约为 2s，实际 {secs}");
 }
 
 #[test]
@@ -111,4 +108,56 @@ fn test_audio_seek_functionality() {
         .expect("Seek 后立刻遇到了非预期的 EOF");
 
     assert!(!frame_after_seek.is_empty(), "Seek 后读取到了空数据包");
+}
+
+#[test]
+fn test_current_playback_time_initially_none() {
+    let wav_data = generate_sine_wav(1.0);
+    let reader = AudioReader::new(Cursor::new(wav_data), 48000, 2).unwrap();
+    assert!(
+        reader.current_playback_time().is_none(),
+        "解码开始前，current_playback_time 应为 None"
+    );
+}
+
+#[test]
+fn test_current_playback_time_advances() {
+    let wav_data = generate_sine_wav(1.0);
+    let mut reader = AudioReader::new(Cursor::new(wav_data), 48000, 2).unwrap();
+
+    reader.receive_frame().unwrap();
+    let first_pts = reader.current_playback_time();
+    assert!(
+        first_pts.is_some(),
+        "解码至少一帧后，current_playback_time 应为 Some"
+    );
+
+    while reader.receive_frame().unwrap().is_some() {}
+    let last_pts = reader.current_playback_time();
+    assert!(
+        last_pts >= first_pts,
+        "播放时间应随解码推进而增大，first={first_pts:?} last={last_pts:?}"
+    );
+}
+
+#[test]
+fn test_current_playback_time_resets_after_seek() {
+    let wav_data = generate_sine_wav(2.0);
+    let mut reader = AudioReader::new(Cursor::new(wav_data), 48000, 2).unwrap();
+
+    reader.receive_frame().unwrap();
+    assert!(reader.current_playback_time().is_some());
+
+    reader.seek(Duration::from_secs(0)).unwrap();
+    assert!(
+        reader.current_playback_time().is_none(),
+        "Seek 后 current_playback_time 应重置为 None"
+    );
+}
+
+#[test]
+fn test_full_decode_no_panic() {
+    let wav_data = generate_sine_wav(1.0);
+    let mut reader = AudioReader::new(Cursor::new(wav_data), 48000, 2).unwrap();
+    while reader.receive_frame().unwrap().is_some() {}
 }

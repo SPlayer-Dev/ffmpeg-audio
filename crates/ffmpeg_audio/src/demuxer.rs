@@ -107,6 +107,19 @@ impl Demuxer {
         }
     }
 
+    pub fn time_base(&self) -> Result<sys::AVRational> {
+        unsafe {
+            let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
+            let tb = (*stream_ptr).time_base;
+
+            if tb.den == 0 {
+                Err(AudioError::from_ffmpeg(sys::AVERROR_INVALIDDATA))
+            } else {
+                Ok(tb)
+            }
+        }
+    }
+
     pub fn seek_to(&mut self, target: Duration) -> Result<()> {
         unsafe {
             let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
