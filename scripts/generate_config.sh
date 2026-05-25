@@ -30,9 +30,9 @@ OPTIONS=(
     --disable-inline-asm
 )
 
-DEMUXERS="aac,ac3,aiff,ape,asf,flac,matroska,mov,mp3,ogg,wav,wv,amr,au,dts,dtshd,m4v,mpc,mpc8,rm,tak,tta,truehd,dsf,dff,spdif,w64"
-DECODERS="aac,aac_latm,ac3,alac,als,ape,flac,mp3,opus,pcm_alaw,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le,pcm_s32be,pcm_s32le,pcm_s8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_u8,vorbis,wavpack,wmalossless,wmapro,wmav1,wmav2,wmavoice,amrnb,amrwb,cook,dca,eac3,mlp,mpc7,mpc8,ra_144,ra_288,shorten,tak,tta,truehd,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar"
-PARSERS="aac,aac_latm,ac3,cook,dca,flac,mlp,mpegaudio,opus,vorbis,tak,amr,sipr"
+DEMUXERS="aac,ac3,aiff,amr,ape,asf,au,caf,dsf,dts,dtshd,eac3,flac,iff,m4v,matroska,mov,mp3,mpc,mpc8,ogg,rm,spdif,tak,truehd,tta,w64,wav,wv"
+DECODERS="aac,aac_latm,ac3,adpcm_ima_wav,adpcm_ms,adpcm_swf,alac,als,amrnb,amrwb,ape,cook,dca,dsd_lsbf,dsd_lsbf_planar,dsd_msbf,dsd_msbf_planar,eac3,flac,mlp,mp3,mpc7,mpc8,opus,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le,pcm_s32be,pcm_s32le,pcm_s8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_u8,ra_144,ra_288,shorten,tak,truehd,tta,vorbis,wavpack,wmalossless,wmapro,wmav1,wmav2,wmavoice"
+PARSERS="aac,aac_latm,ac3,amr,cook,dca,flac,mlp,mpegaudio,opus,sipr,tak,vorbis,wma"
 
 OPTIONS+=("--enable-demuxer=$DEMUXERS")
 OPTIONS+=("--enable-decoder=$DECODERS")
