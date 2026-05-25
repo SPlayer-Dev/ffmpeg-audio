@@ -23,7 +23,7 @@ unsafe extern "C" fn ffmpeg_log_callback(
     avcl: *mut std::os::raw::c_void,
     level: std::os::raw::c_int,
     fmt: *const std::os::raw::c_char,
-    vl: sys::va_list,
+    vl: sys::VaList,
 ) {
     use std::ffi::{
         CStr,
