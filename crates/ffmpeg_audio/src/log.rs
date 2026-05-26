@@ -19,7 +19,7 @@ pub fn init_ffmpeg_logging() {
     INIT_LOGGING.call_once(|| unsafe {
         #[cfg(feature = "tracing")]
         {
-            sys::av_log_set_level(sys::AV_LOG_VERBOSE.cast_signed());
+            sys::av_log_set_level(sys::AV_LOG_TRACE.cast_signed());
             sys::av_log_set_callback(Some(ffmpeg_log_callback));
         }
         #[cfg(not(feature = "tracing"))]
