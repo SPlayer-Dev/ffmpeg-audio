@@ -257,12 +257,13 @@ if (targetOs === "windows") {
 
 const buildDir = `build_out_${targetOs}_${targetArch}`;
 Deno.mkdirSync(buildDir, { recursive: true });
+const safeOptions = options.map((opt) => `'${opt}'`).join(" ");
 
 console.log("运行 Configure 命令:");
-console.log(`../configure ${options.join(" ")}`);
+console.log(`../configure ${safeOptions}`);
 
 const configureCmd = new Deno.Command("bash", {
-	args: ["-c", `../configure ${options.join(" ")}`],
+	args: ["-c", `../configure ${safeOptions}`],
 	cwd: buildDir,
 	stdout: "inherit",
 	stderr: "inherit",
