@@ -115,24 +115,77 @@ mod bundled {
 
     use crate::utils;
 
+    fn parse_log_line(
+        line: &str,
+        ffmpeg_dir: &Path,
+        defines: &mut BTreeSet<(String, Option<String>)>,
+        includes: &mut BTreeSet<String>,
+        c_files: &mut BTreeSet<String>,
+    ) {
+        if (line.contains("-c -o ") || line.contains("-c -Fo")) && line.contains(".c") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for &part in &parts {
+                if part.starts_with("-D") && !part.starts_with("-DBUILDING_") {
+                    let define = &part[2..];
+                    if let Some((k, v)) = define.split_once('=') {
+                        defines.insert((k.to_string(), Some(v.to_string())));
+                    } else {
+                        defines.insert((define.to_string(), None));
+                    }
+                } else if let Some(inc) = part.strip_prefix("-I") {
+                    if inc == "." {
+                        continue;
+                    }
+                    for sep in ["ffmpeg/", "ffmpeg\\"] {
+                        if let Some(idx) = inc.find(sep) {
+                            let rel = &inc[idx + sep.len()..];
+                            if !rel.is_empty() {
+                                includes
+                                    .insert(ffmpeg_dir.join(rel).to_string_lossy().into_owned());
+                            }
+                            break;
+                        }
+                    }
+                } else if Path::new(part)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("c"))
+                    && let Some(idx) = part.find("libav").or_else(|| part.find("libsw"))
+                {
+                    c_files.insert(part[idx..].replace('\\', "/"));
+                }
+            }
+        }
+    }
+
     pub fn build(manifest_dir: &Path, out_dir: &Path) {
-        let slim_zip = manifest_dir.join("vendor").join("ffmpeg_slim.zip");
-        let configs_zip = manifest_dir.join("vendor").join("configs.zip");
+        // 优先使用 vendor/ 下已解压的目录，方便直接修改 C 源码进行调试
+        let vendor_ffmpeg = manifest_dir.join("vendor").join("ffmpeg_slim");
+        let vendor_configs = manifest_dir.join("vendor").join("configs");
 
-        println!("cargo:rerun-if-changed=vendor/ffmpeg_slim.zip");
-        println!("cargo:rerun-if-changed=vendor/configs.zip");
+        let (ffmpeg_dir, configs_base) = if vendor_ffmpeg.exists() && vendor_configs.exists() {
+            println!("cargo:rerun-if-changed=vendor/ffmpeg_slim");
+            println!("cargo:rerun-if-changed=vendor/configs");
+            (vendor_ffmpeg, vendor_configs)
+        } else {
+            let slim_zip = manifest_dir.join("vendor").join("ffmpeg_slim.zip");
+            let configs_zip = manifest_dir.join("vendor").join("configs.zip");
 
-        let ffmpeg_dir = out_dir.join("ffmpeg_slim");
-        let configs_base = out_dir.join("configs");
+            println!("cargo:rerun-if-changed=vendor/ffmpeg_slim.zip");
+            println!("cargo:rerun-if-changed=vendor/configs.zip");
 
-        if !ffmpeg_dir.exists() {
-            utils::extract_zip(&slim_zip, &ffmpeg_dir)
-                .unwrap_or_else(|e| panic!("解压 ffmpeg_slim.zip 失败: {e}"));
-        }
-        if !configs_base.exists() {
-            utils::extract_zip(&configs_zip, &configs_base)
-                .unwrap_or_else(|e| panic!("解压 configs.zip 失败: {e}"));
-        }
+            let ffmpeg_dir = out_dir.join("ffmpeg_slim");
+            let configs_base = out_dir.join("configs");
+
+            if !ffmpeg_dir.exists() {
+                utils::extract_zip(&slim_zip, &ffmpeg_dir)
+                    .unwrap_or_else(|e| panic!("解压 ffmpeg_slim.zip 失败: {e}"));
+            }
+            if !configs_base.exists() {
+                utils::extract_zip(&configs_zip, &configs_base)
+                    .unwrap_or_else(|e| panic!("解压 configs.zip 失败: {e}"));
+            }
+            (ffmpeg_dir, configs_base)
+        };
 
         let config_dir_name = utils::get_config_dir_name();
         let config_dir = configs_base.join(config_dir_name);
@@ -152,40 +205,7 @@ mod bundled {
         let mut includes: BTreeSet<String> = BTreeSet::new();
 
         for line in log_content.lines() {
-            if (line.contains("-c -o ") || line.contains("-c -Fo")) && line.contains(".c") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                for &part in &parts {
-                    if part.starts_with("-D") && !part.starts_with("-DBUILDING_") {
-                        let define = &part[2..];
-                        if let Some((k, v)) = define.split_once('=') {
-                            defines.insert((k.to_string(), Some(v.to_string())));
-                        } else {
-                            defines.insert((define.to_string(), None));
-                        }
-                    } else if let Some(inc) = part.strip_prefix("-I") {
-                        if inc == "." {
-                            continue;
-                        }
-                        for sep in ["ffmpeg/", "ffmpeg\\"] {
-                            if let Some(idx) = inc.find(sep) {
-                                let rel = &inc[idx + sep.len()..];
-                                if !rel.is_empty() {
-                                    includes.insert(
-                                        ffmpeg_dir.join(rel).to_string_lossy().into_owned(),
-                                    );
-                                }
-                                break;
-                            }
-                        }
-                    } else if Path::new(part)
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("c"))
-                        && let Some(idx) = part.find("libav").or_else(|| part.find("libsw"))
-                    {
-                        c_files.insert(part[idx..].replace('\\', "/"));
-                    }
-                }
-            }
+            parse_log_line(line, &ffmpeg_dir, &mut defines, &mut includes, &mut c_files);
         }
 
         let mut build = cc::Build::new();
@@ -298,8 +318,10 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     let slim_zip = manifest_dir.join("vendor").join("ffmpeg_slim.zip");
+    let vendor_ffmpeg = manifest_dir.join("vendor").join("ffmpeg_slim");
+    let vendor_configs = manifest_dir.join("vendor").join("configs");
 
-    if slim_zip.exists() {
+    if slim_zip.exists() || (vendor_ffmpeg.exists() && vendor_configs.exists()) {
         bundled::build(&manifest_dir, &out_dir);
     } else {
         system::build(&out_dir, &target_os);
