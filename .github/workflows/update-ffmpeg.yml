@@ -31,6 +31,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Install Cross Compiler for Linux ARM64
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
@@ -40,15 +45,14 @@ jobs:
       - name: Clone FFmpeg
         run: |
           git clone --depth 1 --branch n8.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
-          cp scripts/generate_config.sh ffmpeg/
+          cp scripts/generate_config.ts ffmpeg/
 
       - name: Run Configuration Script
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: |
           cd ffmpeg
-          chmod +x generate_config.sh
-          ./generate_config.sh ${{ matrix.os }} ${{ matrix.arch }}
+          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -74,16 +78,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Clone FFmpeg
         run: |
           git clone --depth 1 --branch n8.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
-          cp scripts/generate_config.sh ffmpeg/
+          cp scripts/generate_config.ts ffmpeg/
 
       - name: Run Configuration Script
         run: |
           cd ffmpeg
-          chmod +x generate_config.sh
-          ./generate_config.sh ${{ matrix.os }} ${{ matrix.arch }}
+          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -112,6 +120,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Setup MSVC Compiler
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -132,10 +145,9 @@ jobs:
         shell: msys2 {0}
         run: |
           git clone --depth 1 --branch n8.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
-          cp scripts/generate_config.sh ffmpeg/
+          cp scripts/generate_config.ts ffmpeg/
           cd ffmpeg
-          chmod +x generate_config.sh
-          ./generate_config.sh ${{ matrix.os }} ${{ matrix.arch }}
+          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -151,6 +163,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
 
       - name: Download all platform artifacts
         uses: actions/download-artifact@v7
@@ -171,15 +188,9 @@ jobs:
       - name: Clone FFmpeg
         run: git clone --depth 1 --branch n8.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-
       - name: Generate ffmpeg_slim and pack zips
         run: |
-          mkdir -p crates/ffmpeg_audio_sys/vendor
-          python scripts/extract_slim.py
+          deno run -A scripts/extract_slim.ts
 
       - name: Show zip sizes
         run: |

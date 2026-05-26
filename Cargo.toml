@@ -1,3 +1,3 @@
 [workspace]
-members = ["./crates/ffmpeg_audio", "crates/ffmpeg_audio_sys"]
+members = ["./crates/ffmpeg_audio", "./crates/ffmpeg_audio_sys"]
 resolver = "3"

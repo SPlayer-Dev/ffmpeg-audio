@@ -1,0 +1,18 @@
+{
+	"tasks": {
+		"lint": "deno run -A npm:@biomejs/biome lint . --error-on-warnings",
+		"format": "deno run -A npm:@biomejs/biome format --write ."
+	},
+	"lint": {
+		"exclude": ["**/*"]
+	},
+	"fmt": {
+		"exclude": ["**/*"]
+	},
+	"imports": {
+		"@biomejs/biome": "npm:@biomejs/biome@^2.4.15",
+		"@std/fs": "jsr:@std/fs@^1.0.23",
+		"@std/path": "jsr:@std/path@^1.1.4",
+		"jszip": "npm:jszip@^3.10.1"
+	}
+}
