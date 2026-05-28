@@ -12,6 +12,7 @@ use cpal::traits::{
 };
 use ffmpeg_audio::{
     AudioReader,
+    ResampleOptions,
     log::init_ffmpeg_logging,
 };
 use ringbuf::{
@@ -56,7 +57,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎵 声卡已就绪: {sample_rate} Hz, {channels} 声道");
 
     let file = File::open(file_path)?;
-    let mut reader = AudioReader::new(file, i32::try_from(sample_rate)?, i32::from(channels))?;
+    let reader = AudioReader::new(file)?;
+
+    let options = ResampleOptions::new()
+        .sample_rate(i32::try_from(sample_rate)?)
+        .channels(i32::from(channels))
+        .format::<f32>();
 
     let info = reader.source_info();
     println!(
@@ -65,6 +71,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info.sample_rate,
         info.channels
     );
+
+    let mut resampled = reader.into_resampled(options)?;
 
     let buffer_capacity = (sample_rate * u32::from(channels) * 4) as usize;
     let rb = HeapRb::<f32>::new(buffer_capacity);
@@ -87,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stream.play()?;
     println!("▶️ 开始播放...");
 
-    while let Some(frame) = reader.receive_frame()? {
+    while let Some(frame) = resampled.receive_frame_as::<f32>()? {
         let mut written = 0;
 
         while written < frame.len() {
