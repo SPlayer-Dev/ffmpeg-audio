@@ -18,19 +18,21 @@ use std::{
     time::Duration,
 };
 
-use decoder::Decoder;
-use demuxer::Demuxer;
 pub use error::{
     AudioError,
     Result,
 };
 pub use ffmpeg_audio_sys as sys;
+pub use format::AudioSample;
 pub use frame::AudioFrame;
-pub use resampler::ResampleOptions;
-use resampler::Resampler;
+pub use resampler::{
+    ResampleOptions,
+    Resampler,
+};
 
 use crate::{
-    format::AudioSample,
+    decoder::Decoder,
+    demuxer::Demuxer,
     log::init_ffmpeg_logging,
 };
 
