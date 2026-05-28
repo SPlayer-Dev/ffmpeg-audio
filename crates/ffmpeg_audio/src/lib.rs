@@ -157,6 +157,37 @@ impl AudioReader {
         })
     }
 
+    /// Builds a [`Resampler`] pipeline tailored to this audio stream.
+    ///
+    /// This helper method automatically extracts the native channel layout, sample
+    /// format, and sample rate from the underlying decoder, using them as the input
+    /// configuration for the newly created resampler.
+    ///
+    /// This is an advanced API specifically designed for **1-to-N zero-copy dispatching**.
+    /// It allows you to instantiate multiple distinct resamplers (e.g., one for audio
+    /// playback, one for FFT spectrum analysis) and feed them the exact same safely
+    /// borrowed [`AudioFrame`] without incurring any redundant decoding or memory
+    /// allocation overhead.
+    ///
+    /// ## Arguments
+    /// * `options` - The target `ResampleOptions` specifying the desired output
+    ///   sample rate, channel count, and data format.
+    ///
+    /// ## Returns
+    /// * `Ok(Resampler)` - A fully initialized resampler ready to process frames.
+    ///
+    /// ## Errors
+    /// Returns an [`AudioError`] if the provided `options` are invalid, or if the
+    /// internal FFmpeg `SwrContext` allocation and initialization fail.
+    pub fn build_resampler(&self, options: ResampleOptions) -> Result<Resampler> {
+        Resampler::new(
+            &self.decoder.channel_layout(),
+            self.decoder.sample_fmt(),
+            self.decoder.sample_rate(),
+            options,
+        )
+    }
+
     /// Reads and decodes the next available audio frame from the source stream.
     ///
     /// This method pulls a packet from the underlying demuxer, sends it to the decoder,
