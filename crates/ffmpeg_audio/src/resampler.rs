@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    AudioFrame,
     error::{
         AudioError,
         Result,
@@ -160,15 +161,22 @@ impl Resampler {
     /// - `Ok(true)` if valid data was generated and is ready to be read.
     /// - `Ok(false)` if more input frames are needed to produce an output.
     /// - `Err` if a format mismatch or FFmpeg internal error occurs.
-    pub fn process<T: AudioSample>(&mut self, frame: Option<*const sys::AVFrame>) -> Result<bool> {
+    pub fn process<T: AudioSample>(&mut self, frame: Option<&AudioFrame<'_>>) -> Result<bool> {
         if T::FORMAT != self.options.target_sample_fmt {
             return Err(AudioError::FormatMismatch);
         }
 
         unsafe {
-            let (in_data, in_samples) = frame.map_or((ptr::null(), 0), |f| {
-                ((*f).extended_data as *const *const u8, (*f).nb_samples)
-            });
+            let raw_ptr = frame.map_or(ptr::null(), AudioFrame::as_ptr);
+
+            let (in_data, in_samples) = if raw_ptr.is_null() {
+                (ptr::null(), 0)
+            } else {
+                (
+                    (*raw_ptr).extended_data as *const *const u8,
+                    (*raw_ptr).nb_samples,
+                )
+            };
 
             let expected_out_samples = sys::swr_get_out_samples(self.ctx, in_samples);
             crate::fferr!(expected_out_samples);

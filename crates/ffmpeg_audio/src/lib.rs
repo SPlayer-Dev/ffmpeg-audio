@@ -5,6 +5,7 @@ pub mod log;
 mod decoder;
 mod demuxer;
 mod format;
+mod frame;
 mod resampler;
 
 use std::{
@@ -24,6 +25,7 @@ pub use error::{
     Result,
 };
 pub use ffmpeg_audio_sys as sys;
+pub use frame::AudioFrame;
 pub use resampler::ResampleOptions;
 use resampler::Resampler;
 
@@ -153,27 +155,18 @@ impl AudioReader {
         })
     }
 
-    /// Reads and decodes the next available audio packet, returning a pointer
-    /// to the raw FFmpeg `AVFrame`.
+    /// Reads and decodes the next available audio frame from the source stream.
     ///
-    /// This is a low-level API. For most general use cases, it is highly
-    /// recommended to use [`into_resampled`](Self::into_resampled) to obtain
-    /// a type-safe, resampled audio stream instead.
+    /// This method pulls a packet from the underlying demuxer, sends it to the decoder,
+    /// retrieves the decoded raw frame, and finally returns a safe, zero-copy
+    /// [`AudioFrame`] wrapper. You can pass its reference to multiple independent
+    /// [`Resampler`] pipelines simultaneously without cloning the underlying audio data.
     ///
-    /// ## Safety
-    ///
-    /// The returned `*const sys::AVFrame` points to memory managed internally
-    /// by the `AudioReader` (specifically, a reused internal frame buffer).
-    ///
-    /// Be aware, the returned pointer is ONLY valid until the next time
-    /// `receive_raw_frame`, `seek`, or any other mutating method is called
-    /// on this `AudioReader` instance.
-    ///
-    /// Calling `receive_raw_frame` again will internally unreference the
-    /// previous frame data. Dereferencing the old pointer after a subsequent
-    /// read will result in UB. Do not store this pointer; process its data
-    /// immediately instead.
-    pub fn receive_raw_frame(&mut self) -> Result<Option<*const sys::AVFrame>> {
+    /// ## Returns
+    /// - `Ok(Some(AudioFrame))` if a frame was successfully decoded and is ready for use.
+    /// - `Ok(None)` if the end of the audio stream (EOF) has been reached.
+    /// - `Err(AudioError)` if an underlying I/O or FFmpeg decoding error occurs.
+    pub fn receive_frame(&mut self) -> Result<Option<AudioFrame<'_>>> {
         if self.is_exhausted {
             return Ok(None);
         }
@@ -193,7 +186,8 @@ impl AudioReader {
                                 Some(Duration::from_micros(us.max(0).cast_unsigned()));
                         }
                     }
-                    return Ok(Some(frame));
+
+                    return Ok(Some(AudioFrame::new(frame, self.time_base)));
                 }
                 Err(AudioError::Eagain) => match self.demuxer.read_packet()? {
                     Some(packet) => {
@@ -284,10 +278,10 @@ impl ResampledReader {
     /// [`AudioError::FormatMismatch`] will be returned.
     pub fn receive_frame_as<T: AudioSample>(&mut self) -> Result<Option<&[T]>> {
         loop {
-            let raw_frame = self.reader.receive_raw_frame()?;
+            let frame = self.reader.receive_frame()?;
 
-            if let Some(frame) = raw_frame {
-                let has_data = self.resampler.process::<T>(Some(frame))?;
+            if let Some(frame) = frame {
+                let has_data = self.resampler.process::<T>(Some(&frame))?;
 
                 if has_data {
                     return Ok(Some(self.resampler.output_as::<T>()));
