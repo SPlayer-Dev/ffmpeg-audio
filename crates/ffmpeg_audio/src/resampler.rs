@@ -216,6 +216,7 @@ impl Resampler {
     ///
     /// This method should only be called immediately after `process`
     /// returns `Ok(true)`. If there is no valid data, it returns an empty slice.
+    #[must_use]
     pub const fn output_as<T: AudioSample>(&self) -> &[T] {
         if self.output_samples == 0 {
             return &[];
