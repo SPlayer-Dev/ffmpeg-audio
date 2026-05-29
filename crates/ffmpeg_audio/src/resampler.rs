@@ -192,8 +192,10 @@ impl Resampler {
 
             let f64_count = bytes_needed.div_ceil(mem::size_of::<f64>());
 
-            self.out_buffer
-                .reserve(f64_count.saturating_sub(self.out_buffer.capacity()));
+            // Safety: `Vec::reserve` ensures `capacity >= len + additional`
+            // Since we use `out_buffer` strictly as a raw FFI buffer without ever calling `.push()`,
+            // its `len` is perpetually 0.
+            self.out_buffer.reserve(f64_count);
 
             let out_ptr = self.out_buffer.as_mut_ptr().cast::<u8>();
 
