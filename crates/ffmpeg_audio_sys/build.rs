@@ -76,11 +76,9 @@ mod utils {
 
     pub fn emit_link_libs() {
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-        if target_os == "linux"
-            || target_os == "android"
-            || target_os == "macos"
-            || target_os == "ios"
-        {
+        if target_os == "android" {
+            println!("cargo:rustc-link-lib=m");
+        } else if target_os == "linux" || target_os == "macos" || target_os == "ios" {
             println!("cargo:rustc-link-lib=m");
             println!("cargo:rustc-link-lib=pthread");
         } else if target_os == "windows" {
