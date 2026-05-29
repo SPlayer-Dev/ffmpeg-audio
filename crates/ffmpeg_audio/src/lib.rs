@@ -277,6 +277,97 @@ impl AudioReader {
         self.demuxer.duration()
     }
 
+    /// Scans the entire audio stream to calculate its exact duration.
+    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
+        let original_position = self.current_playback_time().unwrap_or(Duration::ZERO);
+
+        self.seek(Duration::ZERO)?;
+
+        let mut max_pts_us: Option<i64> = None;
+        let mut last_frame_duration_us: i64 = 0;
+        let mut total_samples_fallback: usize = 0;
+        let mut scan_error = None;
+
+        if fast_mode {
+            loop {
+                match self.demuxer.read_packet() {
+                    Ok(Some(packet)) => unsafe {
+                        let pts = (*packet).pts;
+                        if pts != sys::AV_NOPTS_VALUE {
+                            let duration = (*packet).duration;
+
+                            let end_pts = if duration > 0 {
+                                pts.saturating_add(duration)
+                            } else {
+                                pts
+                            };
+
+                            let bq = sys::AVRational {
+                                num: 1,
+                                den: sys::AV_TIME_BASE.cast_signed(),
+                            };
+                            let end_us = sys::av_rescale_q(end_pts, self.time_base, bq);
+
+                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(end_us));
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(e) => {
+                        scan_error = Some(e);
+                        break;
+                    }
+                }
+            }
+        } else {
+            let sample_rate = f64::from(self.source_info.sample_rate);
+
+            loop {
+                match self.receive_frame() {
+                    Ok(Some(frame)) => {
+                        let samples = frame.samples();
+                        total_samples_fallback += samples;
+
+                        if let Some(pts) = frame.pts() {
+                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(pts.as_micros() as i64));
+                        }
+
+                        if sample_rate > 0.0 {
+                            let duration_secs = samples as f64 / sample_rate;
+                            last_frame_duration_us = (duration_secs * 1_000_000.0) as i64;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        scan_error = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.seek(original_position)?;
+
+        if let Some(e) = scan_error {
+            return Err(e);
+        }
+
+        if let Some(pts) = max_pts_us {
+            // located a valid timestamp, and add the physical duration of the final frame
+            let total_us = pts.saturating_add(last_frame_duration_us);
+            Ok(Some(Duration::from_micros(total_us.max(0) as u64)))
+        } else if !fast_mode && total_samples_fallback > 0 && self.source_info.sample_rate > 0 {
+            // The entire file contains no PTS, yet we successfully decoded the sample waveform
+            // We calculate the absolute duration by dividing the total number of physical samples
+            // by the sampling rate
+            let duration_secs =
+                total_samples_fallback as f64 / f64::from(self.source_info.sample_rate);
+            Ok(Some(Duration::from_secs_f64(duration_secs)))
+        } else {
+            // Empty file, or no timestamped packets found in Fast Mode
+            Ok(None)
+        }
+    }
+
     #[must_use]
     pub fn cover(&self) -> Option<AudioCover> {
         self.demuxer.cover()
@@ -349,5 +440,31 @@ impl ResampledReader {
         self.reader.seek(target)?;
         self.resampler.flush()?;
         Ok(())
+    }
+
+    /// Scans the entire audio stream to calculate its exact duration.
+    ///
+    /// Unlike the quick estimate provided by [`AudioReader::duration`], this method
+    /// processes the stream to find the true end timestamp. This is useful for
+    /// files or formats with no duration information.
+    ///
+    /// ## Performance
+    /// Because this method performs seeking and flushes the underlying
+    /// decoder and resampler states, it is **highly recommended** to call this
+    /// method **before** you start pulling frames in your main processing loop.
+    /// Calling it mid-playback may cause glitches due to the flushing.
+    ///
+    /// ## Parameters
+    /// - `fast_mode`:
+    ///   - `true` (Packet-level scan): Rapidly reads raw packets from the demuxer without
+    ///     decompressing them. Extremely fast, but relies on the container's timestamps.
+    ///   - `false` (Frame-level scan): Fully decodes the audio into raw frames (equivalent to
+    ///     `ffmpeg -f null -`). This is the most accurate method, but consumes significantly
+    ///     more CPU and time.
+    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
+        let exact_duration = self.reader.scan_exact_duration(fast_mode)?;
+        self.resampler.flush()?;
+
+        Ok(exact_duration)
     }
 }

@@ -59,12 +59,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(file_path)?;
     let reader = AudioReader::new(file)?;
 
+    let quick_duration = reader.duration();
+
     let options = ResampleOptions::new()
         .sample_rate(i32::try_from(sample_rate)?)
         .channels(i32::from(channels))
         .format::<f32>();
 
-    let info = reader.source_info();
+    let mut resampled = reader.into_resampled(options)?;
+
+    let info = resampled.source_info();
     println!(
         "📄 源文件信息: {} ({} Hz, {} 声道)",
         info.codec_name.as_deref().unwrap_or("unknown"),
@@ -72,7 +76,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info.channels
     );
 
-    let mut resampled = reader.into_resampled(options)?;
+    let duration_info = if let Some(dur) = quick_duration {
+        Some(dur)
+    } else if let Some(dur) = resampled.scan_exact_duration(true)? {
+        Some(dur)
+    } else {
+        resampled.scan_exact_duration(false)?
+    };
+
+    if let Some(d) = duration_info {
+        let total_secs = d.as_secs();
+        let minutes = total_secs / 60;
+        let seconds = total_secs % 60;
+        let millis = d.subsec_millis();
+        println!("⏱️ 音频时长: {minutes:02}:{seconds:02}.{millis:03}");
+    } else {
+        println!("⚠️ 无法获取该文件的时长");
+    }
 
     let buffer_capacity = (sample_rate * u32::from(channels) * 4) as usize;
     let rb = HeapRb::<f32>::new(buffer_capacity);
