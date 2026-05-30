@@ -26,20 +26,6 @@ pub const AVERROR_ENOMEM: i32 = averror(libc::ENOMEM);
 /// Decoder not found
 pub const AVERROR_DECODER_NOT_FOUND: i32 = fferr_f8(b"DEC");
 
-/// Passing this as the "whence" parameter to a seek function causes it to
-/// return the filesize without seeking anywhere.
-///
-/// Supporting this is optional.
-/// If it is not supported then the seek function will return <0.
-pub const AVSEEK_SIZE: i32 = 0x10000;
-
-/// OR'ing this flag into the "whence" parameter enables force-seeking.
-///
-/// It may seek by any means (like reopening and linear reading) or other
-/// normally unreasonable means that can be extremely slow.
-/// This is the default and therefore ignored by the seek code since 2010.
-pub const AVSEEK_FORCE: i32 = 0x20000;
-
 /// Undefined timestamp value
 ///
 /// Usually reported by demuxer that work on containers that do not provide

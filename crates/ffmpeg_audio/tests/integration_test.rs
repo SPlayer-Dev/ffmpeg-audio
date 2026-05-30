@@ -210,3 +210,82 @@ fn test_full_decode_no_panic() {
 
     while resampled.receive_frame_as::<f32>().unwrap().is_some() {}
 }
+
+#[test]
+fn test_seek_updates_pts_and_aligns_target() {
+    let wav_data = generate_sine_wav(2.0);
+    let source = Cursor::new(wav_data);
+
+    let reader = AudioReader::new(source).unwrap();
+    let mut resampled = reader
+        .into_resampled(
+            ResampleOptions::new()
+                .sample_rate(48000)
+                .channels(2)
+                .format::<f32>(),
+        )
+        .unwrap();
+
+    resampled.receive_frame_as::<f32>().unwrap();
+    resampled.receive_frame_as::<f32>().unwrap();
+
+    let target = Duration::from_secs_f32(1.0);
+    resampled.seek(target).expect("Seek 调用失败");
+
+    assert!(
+        resampled.current_playback_time().is_none(),
+        "Seek 调用后，在拉取新帧之前，PTS 必须处于重置状态"
+    );
+
+    let frame_after_seek = resampled
+        .receive_frame_as::<f32>()
+        .expect("Seek 后读取帧报错")
+        .expect("Seek 后立刻遇到了非预期的 EOF");
+
+    assert!(!frame_after_seek.is_empty(), "Seek 后读取到了空数据包");
+
+    let post_seek_pts = resampled
+        .current_playback_time()
+        .expect("拉取缓冲帧后 PTS 为 None");
+
+    let diff_ms = if post_seek_pts > target {
+        post_seek_pts.checked_sub(target).unwrap().as_millis()
+    } else {
+        target.checked_sub(post_seek_pts).unwrap().as_millis()
+    };
+
+    assert!(
+        diff_ms < 10,
+        "Seek 不精确：目标时间 {target:?}, 实际到达时间 {post_seek_pts:?}, 误差 {diff_ms}"
+    );
+}
+
+#[test]
+fn test_seek_near_eof_does_not_panic_or_loop() {
+    let wav_data = generate_sine_wav(1.0);
+    let source = Cursor::new(wav_data);
+
+    let reader = AudioReader::new(source).unwrap();
+    let mut resampled = reader
+        .into_resampled(
+            ResampleOptions::new()
+                .sample_rate(48000)
+                .channels(2)
+                .format::<f32>(),
+        )
+        .unwrap();
+
+    let target = Duration::from_secs_f32(0.99);
+    resampled.seek(target).unwrap();
+
+    let mut frames_read = 0;
+    while resampled.receive_frame_as::<f32>().unwrap().is_some() {
+        frames_read += 1;
+        assert!(frames_read < 10, "在文件末尾拉取了过多的帧");
+    }
+
+    assert!(
+        frames_read > 0,
+        "逼近末尾的跳转至少应该能读取到最后的几帧音频"
+    );
+}

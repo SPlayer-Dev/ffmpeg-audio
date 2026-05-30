@@ -9,7 +9,6 @@ mod utils {
         fs,
         io::{
             self,
-            Read,
         },
         path::Path,
     };
@@ -51,13 +50,15 @@ mod utils {
                 .by_index(i)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let entry_name = entry.name().to_owned();
-            assert!(
-                !entry_name.contains(".."),
-                "ZIP 条目包含非法路径: {entry_name}"
-            );
-
-            let out_path = dest.join(&entry_name);
+            let out_path = match entry.enclosed_name() {
+                Some(path) => dest.join(path),
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("ZIP 条目包含非法路径: {}", entry.name()),
+                    ));
+                }
+            };
 
             if entry.is_dir() {
                 fs::create_dir_all(&out_path)?;
@@ -66,9 +67,7 @@ mod utils {
                     fs::create_dir_all(parent)?;
                 }
                 let mut out_file = fs::File::create(&out_path)?;
-                let mut buf = Vec::new();
-                entry.read_to_end(&mut buf)?;
-                io::Write::write_all(&mut out_file, &buf)?;
+                io::copy(&mut entry, &mut out_file)?;
             }
         }
         Ok(())
@@ -100,6 +99,7 @@ mod utils {
             .allowlist_var("AV_.*")
             .allowlist_var("AVERROR_.*")
             .allowlist_var("AVFMT_.*")
+            .allowlist_var("AVSEEK.*")
     }
 }
 

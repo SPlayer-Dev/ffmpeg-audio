@@ -85,7 +85,7 @@ impl IoContext {
 
         let source = unsafe { &mut *opaque.cast::<Box<dyn ReadSeek>>() };
 
-        if whence == sys::AVSEEK_SIZE {
+        if whence == sys::AVSEEK_SIZE.cast_signed() {
             let Ok(current) = source.stream_position() else {
                 return i64::from(sys::averror(libc::ENOSYS));
             };
@@ -101,7 +101,7 @@ impl IoContext {
             return size as i64;
         }
 
-        let seek_from = match whence & (!sys::AVSEEK_FORCE) {
+        let seek_from = match whence & (!sys::AVSEEK_FORCE.cast_signed()) {
             0 => SeekFrom::Start(offset.cast_unsigned()),
             1 => SeekFrom::Current(offset),
             2 => SeekFrom::End(offset),

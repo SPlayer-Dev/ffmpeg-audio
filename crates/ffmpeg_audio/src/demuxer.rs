@@ -140,7 +140,7 @@ impl Demuxer {
                 i64::MIN,
                 pts,
                 pts,
-                0,
+                sys::AVSEEK_FLAG_BACKWARD.cast_signed(),
             );
 
             if ret < 0 {
