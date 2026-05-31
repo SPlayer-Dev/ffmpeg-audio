@@ -132,7 +132,7 @@ jobs:
           deno-version: v2.x
 
       - name: Setup MSVC Compiler
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: apoint123/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.msvc_arch }}
 
