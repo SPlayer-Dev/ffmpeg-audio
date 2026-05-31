@@ -34,7 +34,7 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            cross: true
+            apt_packages: gcc-aarch64-linux-gnu libclang-dev
 
           # Android targets
           - target: aarch64-linux-android
@@ -72,7 +72,7 @@ jobs:
         if: runner.os == 'Linux' && !matrix.cross
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y libasound2-dev ${{ matrix.apt_packages }}
 
       - name: Setup MSVC Compiler
         if: runner.os == 'Windows' && matrix.msvc_arch
@@ -102,11 +102,11 @@ jobs:
         run: cross check --target ${{ matrix.target }} --workspace
 
       - name: Run cargo check
-        if: "!matrix.cross && matrix.target == 'aarch64-apple-ios'"
+        if: "!matrix.cross && (matrix.target == 'aarch64-apple-ios' || matrix.target == 'aarch64-unknown-linux-gnu')"
         run: cargo check --target ${{ matrix.target }} --workspace
 
       - name: Run cargo test
-        if: "!matrix.cross && matrix.target != 'aarch64-apple-ios'"
+        if: "!matrix.cross && matrix.target != 'aarch64-apple-ios' && matrix.target != 'aarch64-unknown-linux-gnu'"
         run: cargo test --target ${{ matrix.target }} --workspace
 
   clippy:
