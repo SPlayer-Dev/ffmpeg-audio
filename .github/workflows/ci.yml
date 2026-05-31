@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows targets
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: i686-pc-windows-msvc
+            os: windows-latest
+            msvc_arch: x86
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            msvc_arch: amd64_arm64
+
+          # macOS targets
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+          # Linux targets
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+
+          # Android targets
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+            cross: true
+          - target: armv7-linux-androideabi
+            os: ubuntu-latest
+            cross: true
+          - target: i686-linux-android
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-linux-android
+            os: ubuntu-latest
+            cross: true
+
+          # iOS target
+          - target: aarch64-apple-ios
+            os: macos-latest
+
+          # WASM target
+          - target: wasm32-unknown-emscripten
+            os: ubuntu-latest
+            emscripten: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup MSVC Compiler
+        if: runner.os == 'Windows' && matrix.msvc_arch
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@cross
+
+      - name: Install Emscripten SDK
+        if: matrix.emscripten
+        uses: emscripten-core/setup-emsdk@v16
+
+      - name: Add Emscripten target
+        if: matrix.emscripten
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Run cargo check
+        if: matrix.cross || matrix.target == 'aarch64-apple-ios'
+        run: cargo check --target ${{ matrix.target }} --workspace
+
+      - name: Run cargo test
+        if: "!matrix.cross && matrix.target != 'aarch64-apple-ios'"
+        run: cargo test --target ${{ matrix.target }} --workspace
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
