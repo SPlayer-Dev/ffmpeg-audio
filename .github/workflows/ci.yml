@@ -99,7 +99,7 @@ jobs:
 
       - name: Run cargo check
         if: matrix.cross || matrix.target == 'aarch64-apple-ios'
-        run: cargo check --target ${{ matrix.target }} --workspace
+        run: cross check --target ${{ matrix.target }} --workspace
 
       - name: Run cargo test
         if: "!matrix.cross && matrix.target != 'aarch64-apple-ios'"
