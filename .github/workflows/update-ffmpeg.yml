@@ -26,6 +26,8 @@ jobs:
             arch: x86_64
           - os: linux
             arch: arm64
+          - os: emscripten
+            arch: wasm32
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
     steps:
       - name: Checkout repository
@@ -35,6 +37,10 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+
+      - name: Install Emscripten SDK
+        if: matrix.os == 'emscripten'
+        uses: emscripten-core/setup-emsdk@v16
 
       - name: Install Cross Compiler for Linux ARM64
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
@@ -209,13 +215,14 @@ jobs:
             - `ffmpeg_slim.zip` — trimmed FFmpeg source for all supported platforms
             - `configs.zip` — per-platform `config.h` and `make_dryrun.log`
             ## Platforms included
-            | Platform | Arch                                |
-            | -------- | ----------------------------------- |
-            | Android  | armeabi-v7a, arm64-v8a, x86, x86_64 |
-            | Linux    | x86_64, arm64                       |
-            | macOS    | x86_64, arm64                       |
-            | iOS      | arm64                               |
-            | Windows  | x86_64, x86, arm64                  |
+            | Platform   | Arch                                |
+            | ---------- | ----------------------------------- |
+            | Android    | armeabi-v7a, arm64-v8a, x86, x86_64 |
+            | Linux      | x86_64, arm64                       |
+            | macOS      | x86_64, arm64                       |
+            | iOS        | arm64                               |
+            | Windows    | x86_64, x86, arm64                  |
+            | Emscripten | wasm32                              |
           commit-message: "chore: update bundled FFmpeg zips"
           add-paths: |
             crates/ffmpeg_audio_sys/vendor/ffmpeg_slim.zip
