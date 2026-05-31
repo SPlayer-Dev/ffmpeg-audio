@@ -36,6 +36,8 @@ mod utils {
             ("linux", "aarch64")   => "build_out_linux_arm64",
             ("linux", "x86_64")    => "build_out_linux_x86_64",
 
+            ("emscripten", "wasm32") => "build_out_emscripten_wasm32",
+
             _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}"),
         }
     }
@@ -236,6 +238,17 @@ mod bundled {
         let mut builder = utils::create_base_bindings()
             .clang_arg(format!("-I{}", ffmpeg_dir.display()))
             .clang_arg(format!("-I{}", config_dir.display()));
+
+        let target = env::var("TARGET").unwrap();
+        builder = builder.clang_arg(format!("--target={target}"));
+
+        if env::var("CARGO_CFG_TARGET_OS").unwrap() == "emscripten" {
+            // Clang defaults to hidden visibility for the wasm32 target, which
+            // causes bindgen to silently skip all extern function declarations.
+            // Overriding to "default" restores normal linkage visibility so that
+            // bindgen emits the expected `extern "C"` function blocks.
+            builder = builder.clang_arg("-fvisibility=default");
+        }
 
         for inc in &includes {
             builder = builder.clang_arg(format!("-I{inc}"));

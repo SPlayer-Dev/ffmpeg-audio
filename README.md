@@ -75,6 +75,7 @@ while let Some(samples) = resampled.receive_frame_as::<f32>()? {
 * `x86_64-unknown-linux-gnu`
 * `aarch64-unknown-linux-gnu`
 * `aarch64-apple-ios`
+* `wasm32-unknown-emscripten`
 
 Other target platforms are not currently supported.
 
@@ -90,6 +91,31 @@ Run an example with:
 ```sh
 cargo run --example play -- path/to/audio.mp3
 cargo run --example metadata -- path/to/audio.flac
+```
+
+## WebAssembly (Emscripten) Build
+
+To build for `wasm32-unknown-emscripten`, install the following prerequisites:
+
+1. **Emscripten SDK (emsdk)** — Follow the [official installation guide](https://emscripten.org/docs/getting_started/downloads.html). After installation, make sure `emcc` is in your `PATH`.
+
+2. **Rust target**:
+   ```sh
+   rustup target add wasm32-unknown-emscripten
+   ```
+
+3. **libclang** — Required by [bindgen](https://github.com/rust-lang/rust-bindgen) to generate C bindings. Most systems already have it; Emscripten SDK also ships one.
+
+Then build as usual:
+
+```sh
+cargo build --target wasm32-unknown-emscripten --release
+```
+
+The output (a `.js` + `.wasm` pair) can be run with Node.js:
+
+```sh
+node target/wasm32-unknown-emscripten/release/your_app.js
 ```
 
 ## Project Structure

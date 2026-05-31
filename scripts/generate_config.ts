@@ -4,7 +4,7 @@ const args = Deno.args;
 if (args.length < 2) {
 	console.error("错误: 缺少参数");
 	console.error(
-		"用法: deno run -A generate_config.ts <windows|linux|android|macos|ios> <x86_64|x86|aarch64|arm|armeabi-v7a|arm64-v8a|arm64>",
+		"用法: deno run -A generate_config.ts <windows|linux|android|macos|ios|emscripten> <x86_64|x86|aarch64|arm|armeabi-v7a|arm64-v8a|arm64|wasm32>",
 	);
 	Deno.exit(1);
 }
@@ -31,6 +31,9 @@ const options: string[] = [
 	"--disable-asm",
 	"--disable-x86asm",
 	"--disable-inline-asm",
+	"--disable-pthreads",
+	"--disable-w32threads",
+	"--disable-os2threads",
 ];
 
 const demuxers = [
@@ -248,6 +251,18 @@ if (targetOs === "windows") {
 		targetArch = "arm64";
 	} else {
 		console.error(`不支持的 iOS 架构: ${targetArch}`);
+		Deno.exit(1);
+	}
+} else if (targetOs === "emscripten") {
+	options.push("--target-os=none", "--enable-cross-compile");
+	if (targetArch === "wasm32") {
+		options.push("--arch=wasm32");
+		options.push("--cc=emcc");
+		options.push("--ar=emar");
+		options.push("--extra-cflags=-DARCH_WASM32=1");
+		options.push("--extra-cflags=-msimd128");
+	} else {
+		console.error(`不支持的 Emscripten 架构: ${targetArch}`);
 		Deno.exit(1);
 	}
 } else {
