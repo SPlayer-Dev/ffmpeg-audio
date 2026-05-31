@@ -31,9 +31,6 @@ const options: string[] = [
 	"--disable-asm",
 	"--disable-x86asm",
 	"--disable-inline-asm",
-	"--disable-pthreads",
-	"--disable-w32threads",
-	"--disable-os2threads",
 ];
 
 const demuxers = [
@@ -255,6 +252,17 @@ if (targetOs === "windows") {
 	}
 } else if (targetOs === "emscripten") {
 	options.push("--target-os=none", "--enable-cross-compile");
+
+	// Disable multi-threading-related features only when targeting WASM.
+	// FFmpeg's `avcodec.c` uses runtime `if` statements rather than preprocessor `#if` directives—for example:
+	// https://github.com/FFmpeg/FFmpeg/blob/239f2c733de417201d7ad3b3b8b0d9b63285b2b1/libavcodec/avcodec.c#L325-L333
+	// Under the `/Od` flag, MSVC does not perform constant folding; consequently, calls to multi-threading-related
+	// symbols within these `if` statements are retained, resulting in linker errors.
+	options.push(
+		"--disable-pthreads",
+		"--disable-w32threads",
+		"--disable-os2threads",
+	);
 	if (targetArch === "wasm32") {
 		options.push("--arch=wasm32");
 		options.push("--cc=emcc");
