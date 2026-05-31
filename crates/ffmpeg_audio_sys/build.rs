@@ -249,6 +249,21 @@ mod bundled {
             // bindgen emits the expected `extern "C"` function blocks.
             builder = builder.clang_arg("-fvisibility=default");
 
+            // Emscripten uses musl libc which lacks glibc's __UINT8_C / __UINT16_C / __UINT64_C macros.
+            builder = builder
+                .clang_arg("-D__UINT8_C(c)=c")
+                .clang_arg("-D__UINT16_C(c)=c")
+                .clang_arg("-D__UINT32_C(c)=c ## U")
+                .clang_arg("-D__UINT64_C(c)=c ## ULL")
+                .clang_arg("-D__INT8_C(c)=c")
+                .clang_arg("-D__INT16_C(c)=c")
+                .clang_arg("-D__INT32_C(c)=c")
+                .clang_arg("-D__INT64_C(c)=c ## LL")
+                .clang_arg("-D__INTMAX_C(c)=c ## LL")
+                .clang_arg("-D__UINTMAX_C(c)=c ## ULL")
+                .clang_arg("-D__SIZE_C(c)=c ## UL")
+                .clang_arg("-D__PTRDIFF_C(c)=c ## L");
+
             if let Ok(emsdk) = env::var("EMSDK") {
                 let sysroot = format!("{emsdk}/upstream/emscripten/cache/sysroot");
                 builder = builder.clang_arg(format!("--sysroot={sysroot}"));
