@@ -1,6 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_lines)]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     use std::{
         env,
         fs::File,
@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         time::Duration,
     };
 
+    use anyhow::Context;
     use cpal::traits::{
         DeviceTrait as _,
         HostTrait as _,
@@ -50,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
-        .expect("未找到默认音频输出设备");
+        .context("未找到默认音频输出设备")?;
 
     let config = device.default_output_config()?;
     let sample_rate = config.sample_rate();
@@ -58,8 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🎵 声卡已就绪: {sample_rate} Hz, {channels} 声道");
 
-    let file = File::open(file_path)?;
-    let reader = AudioReader::new(file)?;
+    let file = File::open(file_path).context("无法打开音频文件")?;
+    let reader = AudioReader::new(file).context("无法初始化音频解码器")?;
 
     let quick_duration = reader.duration();
 

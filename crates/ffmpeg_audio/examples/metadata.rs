@@ -4,9 +4,10 @@ use std::{
     path::Path,
 };
 
+use anyhow::Context;
 use ffmpeg_audio::AudioReader;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("用法: {} <音频文件路径>", args[0]);
@@ -15,8 +16,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let file_path = &args[1];
 
-    let file = File::open(file_path)?;
-    let reader = AudioReader::new(file)?;
+    let file = File::open(file_path).context("无法打开音频文件")?;
+    let reader = AudioReader::new(file).context("无法初始化音频解码器")?;
 
     let info = reader.source_info();
     println!(
