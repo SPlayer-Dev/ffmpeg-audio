@@ -248,6 +248,13 @@ mod bundled {
             // Overriding to "default" restores normal linkage visibility so that
             // bindgen emits the expected `extern "C"` function blocks.
             builder = builder.clang_arg("-fvisibility=default");
+
+            if let Ok(emsdk) = env::var("EMSDK") {
+                let sysroot = format!("{emsdk}/upstream/emscripten/cache/sysroot");
+                builder = builder.clang_arg(format!("--sysroot={sysroot}"));
+            } else {
+                println!("cargo:warning=未检测到 EMSDK 环境变量，bindgen 可能无法找到头文件");
+            }
         }
 
         for inc in &includes {
