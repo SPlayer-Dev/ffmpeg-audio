@@ -97,9 +97,13 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Run cargo check
-        if: matrix.cross || matrix.target == 'aarch64-apple-ios'
+      - name: Run cross check
+        if: matrix.cross
         run: cross check --target ${{ matrix.target }} --workspace
+
+      - name: Run cargo check
+        if: "!matrix.cross && matrix.target == 'aarch64-apple-ios'"
+        run: cargo check --target ${{ matrix.target }} --workspace
 
       - name: Run cargo test
         if: "!matrix.cross && matrix.target != 'aarch64-apple-ios'"
