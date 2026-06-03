@@ -3,6 +3,7 @@ use std::ptr;
 use crate::{
     error::{
         AudioError,
+        FfErrorExt as _,
         Result,
     },
     sys,
@@ -67,8 +68,7 @@ impl Decoder {
 
     pub fn send_packet(&mut self, packet: *const sys::AVPacket) -> Result<()> {
         unsafe {
-            let ret = sys::avcodec_send_packet(self.ctx, packet);
-            crate::fferr!(ret);
+            sys::avcodec_send_packet(self.ctx, packet).into_ff_result()?;
             Ok(())
         }
     }
@@ -86,8 +86,7 @@ impl Decoder {
         }
         self.is_flushing = true;
         unsafe {
-            let ret = sys::avcodec_send_packet(self.ctx, ptr::null());
-            crate::fferr!(ret);
+            sys::avcodec_send_packet(self.ctx, ptr::null()).into_ff_result()?;
         }
         Ok(())
     }
@@ -96,14 +95,9 @@ impl Decoder {
         unsafe {
             sys::av_frame_unref(self.frame);
 
-            let ret = sys::avcodec_receive_frame(self.ctx, self.frame);
+            let ret = sys::avcodec_receive_frame(self.ctx, self.frame).into_ff_opt()?;
 
-            match ret {
-                0 => Ok(Some(self.frame)),
-                crate::sys::AVERROR_EAGAIN => Err(AudioError::Eagain),
-                crate::sys::AVERROR_EOF => Ok(None),
-                _ => Err(AudioError::from_ffmpeg(ret)),
-            }
+            Ok(ret.map(|_| self.frame))
         }
     }
 

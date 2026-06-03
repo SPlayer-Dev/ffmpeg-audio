@@ -1,11 +1,11 @@
-use std::ffi::CStr;
+use std::{
+    ffi::CStr,
+    os::raw::c_int,
+};
 
 use thiserror::Error;
 
 use crate::sys;
-
-// https://github.com/FFmpeg/FFmpeg/blob/239f2c733de417201d7ad3b3b8b0d9b63285b2b1/libavutil/error.h#L86
-const AV_ERROR_MAX_STRING_SIZE: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -35,7 +35,7 @@ impl AudioError {
             sys::AVERROR_EOF => Self::Eof,
             sys::AVERROR_EAGAIN => Self::Eagain,
             _ => {
-                let mut buf = [0u8; AV_ERROR_MAX_STRING_SIZE];
+                let mut buf = [0u8; sys::AV_ERROR_MAX_STRING_SIZE as usize];
 
                 unsafe {
                     sys::av_strerror(code, buf.as_mut_ptr().cast::<libc::c_char>(), buf.len());
@@ -54,17 +54,57 @@ impl AudioError {
 
 pub type Result<T> = std::result::Result<T, AudioError>;
 
-/// 一个方便的宏，用于在调用 FFmpeg C 函数后快速捕获错误
+/// An extension trait for FFmpeg's `c_int` return codes.
 ///
-/// 如果返回值大于等于 0，则直接返回该值；
-/// 如果小于 0，则自动将其转换为 [`AudioError`] 并用 `?` 抛出
-#[macro_export]
-macro_rules! fferr {
-    ($expr:expr) => {{
-        let ret = $expr;
-        if ret < 0 {
-            return Err($crate::error::AudioError::from_ffmpeg(ret));
+/// This trait provides convenient methods to convert raw FFmpeg integer
+/// return values into idiomatic Rust `Result` types, automatically
+/// handling error mapping and common control flow states like EOF.
+pub trait FfErrorExt {
+    fn into_ff_result(self) -> Result<c_int>;
+    fn into_ff_opt(self) -> Result<Option<c_int>>;
+}
+
+impl FfErrorExt for c_int {
+    /// Converts an FFmpeg return code into a `Result<c_int>`.
+    ///
+    /// Values greater than or equal to `0` are considered successful and are
+    /// returned as `Ok(val)`. Negative values are treated as errors and are
+    /// mapped to [`AudioError`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns an [`AudioError`] if the underlying FFmpeg operation returns a
+    /// negative error code.
+    fn into_ff_result(self) -> Result<c_int> {
+        if self < 0 {
+            Err(AudioError::from_ffmpeg(self))
+        } else {
+            Ok(self)
         }
-        ret
-    }};
+    }
+
+    /// Converts an FFmpeg return code into a `Result<Option<c_int>>`
+    ///
+    /// This method handles the [`AVERROR_EOF`](sys::AVERROR_EOF) state by mapping it to `Ok(None)`,
+    /// distinguishing expected end-of-stream states from actual fatal errors.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(None)` if the return code is [`AVERROR_EOF`](sys::AVERROR_EOF).
+    /// - `Ok(Some(val))` if the return code is greater than or equal to `0`.
+    /// - `Err(AudioError)` for any other negative return code.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an [`AudioError`] if the underlying FFmpeg operation fails with an
+    /// error code other than `AVERROR_EOF`.
+    fn into_ff_opt(self) -> Result<Option<c_int>> {
+        if self == sys::AVERROR_EOF {
+            Ok(None)
+        } else if self < 0 {
+            Err(AudioError::from_ffmpeg(self))
+        } else {
+            Ok(Some(self))
+        }
+    }
 }

@@ -6,6 +6,7 @@ use std::{
 use crate::{
     error::{
         AudioError,
+        FfErrorExt as _,
         Result,
     },
     sys,
@@ -52,7 +53,8 @@ impl SwrContext {
     ) -> Result<Self> {
         unsafe {
             let mut ctx = ptr::null_mut();
-            let ret = sys::swr_alloc_set_opts2(
+
+            sys::swr_alloc_set_opts2(
                 &raw mut ctx,
                 out_layout,
                 out_sample_fmt,
@@ -62,33 +64,33 @@ impl SwrContext {
                 in_sample_rate,
                 0,
                 ptr::null_mut(),
-            );
-            crate::fferr!(ret);
+            )
+            .into_ff_result()?;
 
             if ctx.is_null() {
                 return Err(AudioError::from_ffmpeg(sys::AVERROR_ENOMEM));
             }
 
-            let out_sample_fmt_bytes = sys::av_get_bytes_per_sample(out_sample_fmt);
-            if out_sample_fmt_bytes <= 0 {
+            if let Err(e) = sys::swr_init(ctx).into_ff_result() {
                 sys::swr_free(&raw mut ctx);
-                return Err(AudioError::InvalidParameter(
-                    "Unknown output sample format".to_string(),
-                ));
+                return Err(e);
             }
 
             let out_channels = out_layout.nb_channels as usize;
             let out_bytes_per_sample = sys::av_get_bytes_per_sample(out_sample_fmt) as usize;
 
-            let swr = Self {
+            if out_bytes_per_sample == 0 {
+                sys::swr_free(&raw mut ctx);
+                return Err(AudioError::InvalidParameter(
+                    "Unknown or unsupported output sample format".to_string(),
+                ));
+            }
+
+            Ok(Self {
                 ctx,
                 out_channels,
                 out_bytes_per_sample,
-            };
-            let ret = sys::swr_init(swr.ctx);
-            crate::fferr!(ret);
-
-            Ok(swr)
+            })
         }
     }
 
@@ -104,8 +106,7 @@ impl SwrContext {
     /// Returns an [`AudioError`] if the underlying FFmpeg calculation fails.
     pub fn get_out_samples(&self, in_samples: i32) -> Result<i32> {
         unsafe {
-            let ret = sys::swr_get_out_samples(self.ctx, in_samples);
-            crate::fferr!(ret);
+            let ret = sys::swr_get_out_samples(self.ctx, in_samples).into_ff_result()?;
             Ok(ret)
         }
     }
@@ -119,8 +120,7 @@ impl SwrContext {
     /// Returns an [`AudioError`] if re-initialization fails.
     pub fn flush(&mut self) -> Result<()> {
         unsafe {
-            let ret = sys::swr_init(self.ctx);
-            crate::fferr!(ret);
+            sys::swr_init(self.ctx).into_ff_result()?;
             Ok(())
         }
     }
@@ -170,8 +170,8 @@ impl SwrContext {
                 in_data,
                 in_samples,
             )
-        };
-        crate::fferr!(actual_samples);
+        }
+        .into_ff_result()?;
 
         Ok(actual_samples as usize)
     }

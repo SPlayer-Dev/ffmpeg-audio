@@ -9,6 +9,7 @@ use crate::{
     AudioCover,
     error::{
         AudioError,
+        FfErrorExt as _,
         Result,
     },
     io::IoContext,
@@ -92,12 +93,11 @@ impl Demuxer {
             unsafe {
                 sys::av_packet_unref(self.packet);
 
-                let ret = sys::av_read_frame(self.ctx, self.packet);
-
-                if ret == crate::sys::AVERROR_EOF {
+                if sys::av_read_frame(self.ctx, self.packet)
+                    .into_ff_opt()?
+                    .is_none()
+                {
                     return Ok(None);
-                } else if ret < 0 {
-                    return Err(AudioError::from_ffmpeg(ret));
                 }
 
                 if (*self.packet).stream_index == self.audio_stream_idx as i32 {
