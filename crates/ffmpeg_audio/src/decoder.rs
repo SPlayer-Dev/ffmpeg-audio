@@ -42,7 +42,7 @@ impl Decoder {
 
             let frame = sys::av_frame_alloc();
             if frame.is_null() {
-                sys::avcodec_free_context(&mut ctx.clone());
+                sys::avcodec_free_context(&raw mut ctx);
                 return Err(AudioError::from_ffmpeg(sys::AVERROR_ENOMEM));
             }
 

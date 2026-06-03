@@ -98,7 +98,7 @@ impl IoContext {
                 return i64::from(sys::averror(libc::EIO));
             }
 
-            return size as i64;
+            return size.cast_signed();
         }
 
         let seek_from = match whence & (!sys::AVSEEK_FORCE.cast_signed()) {
@@ -110,7 +110,7 @@ impl IoContext {
 
         source
             .seek(seek_from)
-            .map_or_else(|_| i64::from(sys::averror(libc::EIO)), |pos| pos as i64)
+            .map_or_else(|_| i64::from(sys::averror(libc::EIO)), u64::cast_signed)
     }
 }
 

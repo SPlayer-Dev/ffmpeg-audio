@@ -7,6 +7,7 @@ mod demuxer;
 mod format;
 mod frame;
 mod resampler;
+mod swr;
 
 use std::{
     collections::HashMap,
@@ -29,6 +30,7 @@ pub use resampler::{
     ResampleOptions,
     Resampler,
 };
+pub use swr::SwrContext;
 
 use crate::{
     decoder::Decoder,

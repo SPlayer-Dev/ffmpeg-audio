@@ -13,6 +13,7 @@ use crate::{
         Result,
     },
     format::AudioSample,
+    swr::SwrContext,
     sys,
 };
 
@@ -85,7 +86,7 @@ impl ResampleOptions {
 }
 
 pub struct Resampler {
-    ctx: *mut sys::SwrContext,
+    swr: SwrContext,
     options: ResampleOptions,
     out_buffer: Vec<MaybeUninit<f64>>,
     output_samples: usize,
@@ -108,34 +109,19 @@ impl Resampler {
             let mut out_layout = mem::zeroed::<sys::AVChannelLayout>();
             sys::av_channel_layout_default(&raw mut out_layout, options.target_channels);
 
-            let mut ctx = ptr::null_mut();
-            let ret = sys::swr_alloc_set_opts2(
-                &raw mut ctx,
-                &raw const out_layout,
+            let swr = SwrContext::new(
+                &out_layout,
                 options.target_sample_fmt,
                 options.target_sample_rate,
                 in_layout,
                 in_sample_fmt,
                 in_sample_rate,
-                0,
-                ptr::null_mut(),
-            );
-            crate::fferr!(ret);
-
-            if ctx.is_null() {
-                return Err(AudioError::from_ffmpeg(sys::AVERROR_ENOMEM));
-            }
-
-            let ret = sys::swr_init(ctx);
-            if ret < 0 {
-                sys::swr_free(&raw mut ctx);
-                return Err(AudioError::from_ffmpeg(ret));
-            }
+            )?;
 
             sys::av_channel_layout_uninit(&raw mut out_layout);
 
             Ok(Self {
-                ctx,
+                swr,
                 options,
                 out_buffer: Vec::new(),
                 output_samples: 0,
@@ -144,11 +130,7 @@ impl Resampler {
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        unsafe {
-            let ret = sys::swr_init(self.ctx);
-            crate::fferr!(ret);
-            Ok(())
-        }
+        self.swr.flush()
     }
 
     /// Processes a single raw audio frame and writes the converted samples
@@ -178,9 +160,7 @@ impl Resampler {
                 )
             };
 
-            let expected_out_samples = sys::swr_get_out_samples(self.ctx, in_samples);
-            crate::fferr!(expected_out_samples);
-
+            let expected_out_samples = self.swr.get_out_samples(in_samples)?;
             if expected_out_samples <= 0 {
                 self.output_samples = 0;
                 return Ok(false);
@@ -197,18 +177,17 @@ impl Resampler {
             // its `len` is perpetually 0.
             self.out_buffer.reserve(f64_count);
 
-            let out_ptr = self.out_buffer.as_mut_ptr().cast::<u8>();
-
-            let actual_out_samples = sys::swr_convert(
-                self.ctx,
-                &raw const out_ptr,
-                expected_out_samples,
-                in_data,
-                in_samples,
+            let capacity_bytes = self.out_buffer.capacity() * mem::size_of::<f64>();
+            let out_buf_slice = std::slice::from_raw_parts_mut(
+                self.out_buffer.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+                capacity_bytes,
             );
-            crate::fferr!(actual_out_samples);
 
-            self.output_samples = (actual_out_samples as usize) * out_channels;
+            let actual_out_samples = self
+                .swr
+                .convert_packed(in_data, in_samples, out_buf_slice)?;
+
+            self.output_samples = actual_out_samples * out_channels;
 
             Ok(self.output_samples > 0)
         }
@@ -225,16 +204,6 @@ impl Resampler {
         }
         unsafe {
             std::slice::from_raw_parts(self.out_buffer.as_ptr().cast::<T>(), self.output_samples)
-        }
-    }
-}
-
-impl Drop for Resampler {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.ctx.is_null() {
-                sys::swr_free(&raw mut self.ctx);
-            }
         }
     }
 }
