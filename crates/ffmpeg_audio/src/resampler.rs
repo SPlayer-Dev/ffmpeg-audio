@@ -85,10 +85,16 @@ impl ResampleOptions {
     }
 }
 
+/// The high-level audio resampler pipeline.
+///
+/// This struct manages the format verification, buffer allocation, and
+/// interaction with the underlying FFmpeg `SwrContext`. It is strictly
+/// non-generic to prevent generic viral spread, applying type parameters
+/// only at the boundaries of data processing (`process`) and extraction (`output_as`).
 pub struct Resampler {
     swr: SwrContext,
     options: ResampleOptions,
-    out_buffer: Vec<MaybeUninit<f64>>,
+    buffer: RawAudioBuffer,
     output_samples: usize,
 }
 
@@ -123,7 +129,7 @@ impl Resampler {
             Ok(Self {
                 swr,
                 options,
-                out_buffer: Vec::new(),
+                buffer: RawAudioBuffer::default(),
                 output_samples: 0,
             })
         }
@@ -167,22 +173,13 @@ impl Resampler {
             }
 
             let out_channels = self.options.target_channels as usize;
-            let total_expected_samples = (expected_out_samples as usize) * out_channels;
-            let bytes_needed = total_expected_samples * mem::size_of::<T>();
 
-            let f64_count = bytes_needed.div_ceil(mem::size_of::<f64>());
+            let bytes_needed =
+                (expected_out_samples as usize) * out_channels * std::mem::size_of::<T>();
 
-            // Safety: `Vec::reserve` ensures `capacity >= len + additional`
-            // Since we use `out_buffer` strictly as a raw FFI buffer without ever calling `.push()`,
-            // its `len` is perpetually 0.
-            self.out_buffer.reserve(f64_count);
+            self.buffer.reserve_bytes(bytes_needed);
 
-            let capacity_bytes = self.out_buffer.capacity() * mem::size_of::<f64>();
-            let out_buf_slice = std::slice::from_raw_parts_mut(
-                self.out_buffer.as_mut_ptr().cast::<MaybeUninit<u8>>(),
-                capacity_bytes,
-            );
-
+            let out_buf_slice = self.buffer.as_uninit_bytes_mut();
             let actual_out_samples = self
                 .swr
                 .convert_packed(in_data, in_samples, out_buf_slice)?;
@@ -202,8 +199,64 @@ impl Resampler {
         if self.output_samples == 0 {
             return &[];
         }
+        unsafe { self.buffer.as_typed_slice::<T>(self.output_samples) }
+    }
+}
+
+/// A type-erased, low-level audio buffer designed for safe FFI interactions.
+///
+/// This buffer internally uses `Vec<MaybeUninit<f64>>` to guarantee strict
+/// 8-byte memory alignment, which safely accommodates all standard FFmpeg
+/// audio sample formats without triggering UB.
+#[derive(Default)]
+pub struct RawAudioBuffer {
+    inner: Vec<MaybeUninit<f64>>,
+}
+
+impl RawAudioBuffer {
+    /// Reserves minimum physical capacity to hold the requested number of bytes.
+    ///
+    /// This method only increases the underlying `capacity` of the allocator.
+    /// The `len` of the internal vector remains perpetually `0`. It calculates
+    /// the required number of `f64` blocks to satisfy the byte requirement
+    /// while maintaining the 8-byte alignment constraint.
+    ///
+    /// # Arguments
+    /// * `required_bytes` - The absolute minimum number of bytes needed for
+    ///   the upcoming FFI write operation.
+    pub fn reserve_bytes(&mut self, required_bytes: usize) {
+        let f64_count = required_bytes.div_ceil(mem::size_of::<f64>());
+        self.inner.reserve(f64_count);
+    }
+
+    /// Exposes the entire allocated physical capacity as a mutable slice of
+    /// uninitialized bytes.
+    ///
+    /// # Returns
+    /// A mutable slice spanning the total reserved capacity, represented as
+    /// `MaybeUninit<u8>`.
+    pub const fn as_uninit_bytes_mut(&mut self) -> &mut [MaybeUninit<u8>] {
+        let capacity_bytes = self.inner.capacity() * mem::size_of::<f64>();
         unsafe {
-            std::slice::from_raw_parts(self.out_buffer.as_ptr().cast::<T>(), self.output_samples)
+            std::slice::from_raw_parts_mut(
+                self.inner.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+                capacity_bytes,
+            )
         }
+    }
+
+    /// Casts the underlying memory and extracts a typed, initialized slice.
+    ///
+    /// # Safety
+    /// This function performs unchecked type punning. The caller must guarantee
+    /// all of the following:
+    /// 1. **Initialization**: C side must have successfully written valid data
+    ///    spanning at least `element_count` elements into the front of this buffer.
+    /// 2. **Type Matching**: The physical bytes written by the FFI must exactly
+    ///    match the memory layout and semantics of the requested Rust type `T`.
+    /// 3. **Bounds**: `element_count * size_of::<T>()` must not exceed the
+    ///    previously reserved capacity.
+    pub const unsafe fn as_typed_slice<T: AudioSample>(&self, element_count: usize) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.inner.as_ptr().cast::<T>(), element_count) }
     }
 }
