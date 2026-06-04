@@ -14,6 +14,7 @@ use crate::{
     },
     io::IoContext,
     sys,
+    time::TimeBase,
 };
 
 pub struct Demuxer {
@@ -107,16 +108,18 @@ impl Demuxer {
         }
     }
 
-    pub fn time_base(&self) -> Result<sys::AVRational> {
+    pub fn time_base(&self) -> Result<TimeBase> {
         unsafe {
-            let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
-            let tb = (*stream_ptr).time_base;
-
-            if tb.den == 0 {
-                Err(AudioError::from_ffmpeg(sys::AVERROR_INVALIDDATA))
-            } else {
-                Ok(tb)
+            if self.audio_stream_idx >= (*self.ctx).nb_streams as usize {
+                return Err(AudioError::InvalidParameter(
+                    "Audio stream index out of bounds".to_string(),
+                ));
             }
+
+            let stream = *(*self.ctx).streams.add(self.audio_stream_idx);
+            let raw_tb = (*stream).time_base;
+
+            TimeBase::try_new(raw_tb)
         }
     }
 
@@ -127,12 +130,7 @@ impl Demuxer {
 
             let target_us = target.as_micros() as i64;
 
-            let bq = sys::AVRational {
-                num: 1,
-                den: 1_000_000,
-            };
-
-            let pts = sys::av_rescale_q(target_us, bq, time_base);
+            let pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
 
             let ret = sys::avformat_seek_file(
                 self.ctx,
@@ -217,11 +215,8 @@ impl Demuxer {
             if stream_duration >= 0 && stream_duration != sys::AV_NOPTS_VALUE {
                 let time_base = (*stream_ptr).time_base;
 
-                let bq = sys::AVRational {
-                    num: 1,
-                    den: sys::AV_TIME_BASE.cast_signed(),
-                };
-                let duration_us = sys::av_rescale_q(stream_duration, time_base, bq);
+                let duration_us =
+                    sys::av_rescale_q(stream_duration, time_base, sys::MICROSECONDS_Q);
 
                 if duration_us >= 0 {
                     return Some(Duration::from_micros(duration_us.cast_unsigned()));

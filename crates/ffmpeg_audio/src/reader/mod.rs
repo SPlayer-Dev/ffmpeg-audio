@@ -4,14 +4,14 @@ pub use pipeline::AudioPipeline;
 pub use scan::DurationScanner;
 pub use seek::SeekEngine;
 
-use crate::sys;
+use crate::time::TimeBase;
 
 mod pipeline;
 mod scan;
 mod seek;
 
 pub struct PlaybackState {
-    pub time_base: sys::AVRational,
+    pub time_base: TimeBase,
     pub current_pts: Option<Duration>,
     pub is_exhausted: bool,
     pub has_buffered_seek_frame: bool,
@@ -24,14 +24,10 @@ impl PlaybackState {
             "Stream is marked as exhausted, but a buffered seek frame is present."
         );
 
-        debug_assert!(
-            self.time_base.den > 0,
-            "Time base denominator is zero or negative."
-        );
+        let tb = self.time_base.as_rational();
 
-        debug_assert!(
-            self.time_base.num > 0,
-            "Time base numerator is zero or negative."
-        );
+        debug_assert!(tb.den > 0, "Time base denominator is zero or negative.");
+
+        debug_assert!(tb.num > 0, "Time base numerator is zero or negative.");
     }
 }

@@ -37,18 +37,19 @@ impl DurationScanner {
                 match demuxer.read_packet() {
                     Ok(Some(packet)) => unsafe {
                         let pts = (*packet).pts;
-                        if pts != sys::AV_NOPTS_VALUE {
-                            let duration = (*packet).duration;
-                            let end_pts = if duration > 0 {
-                                pts.saturating_add(duration)
-                            } else {
-                                pts
-                            };
-                            let bq = sys::AVRational {
-                                num: 1,
-                                den: sys::AV_TIME_BASE.cast_signed(),
-                            };
-                            let end_us = sys::av_rescale_q(end_pts, state.time_base, bq);
+
+                        if pts == sys::AV_NOPTS_VALUE {
+                            continue;
+                        }
+
+                        let duration = (*packet).duration;
+                        let end_pts = if duration > 0 {
+                            pts.saturating_add(duration)
+                        } else {
+                            pts
+                        };
+
+                        if let Some(end_us) = state.time_base.calc_micros(end_pts) {
                             max_pts_us = Some(max_pts_us.unwrap_or(0).max(end_us));
                         }
                     },

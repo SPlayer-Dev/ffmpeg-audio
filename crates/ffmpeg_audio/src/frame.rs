@@ -4,7 +4,10 @@ use std::{
     time::Duration,
 };
 
-use crate::sys;
+use crate::{
+    sys,
+    time::TimeBase,
+};
 
 /// A safe, zero-copy wrapper around FFmpeg's raw `AVFrame`.
 ///
@@ -12,7 +15,7 @@ use crate::sys;
 /// `Resampler` instances simultaneously.
 pub struct AudioFrame<'a> {
     ptr: NonNull<sys::AVFrame>,
-    time_base: sys::AVRational,
+    time_base: TimeBase,
     _marker: PhantomData<&'a mut ()>,
 }
 
@@ -23,7 +26,7 @@ impl AudioFrame<'_> {
     /// This method is for internal crate use. The caller ensures that the provided
     /// `ptr` is a valid FFmpeg `AVFrame` and that its memory remains valid for the
     /// duration of the lifetime.
-    pub(crate) const fn new(ptr: *const sys::AVFrame, time_base: sys::AVRational) -> Self {
+    pub(crate) const fn new(ptr: *const sys::AVFrame, time_base: TimeBase) -> Self {
         Self {
             ptr: NonNull::new(ptr.cast_mut()).expect("FFmpeg returned a null AVFrame pointer"),
             time_base,
@@ -55,18 +58,7 @@ impl AudioFrame<'_> {
     /// - `None` if the underlying frame lacks a valid PTS (`AV_NOPTS_VALUE`).
     #[must_use]
     pub fn pts(&self) -> Option<Duration> {
-        unsafe {
-            let pts = (*self.ptr.as_ptr()).pts;
-            if pts == sys::AV_NOPTS_VALUE {
-                None
-            } else {
-                let bq = sys::AVRational {
-                    num: 1,
-                    den: sys::AV_TIME_BASE.cast_signed(),
-                };
-                let us = sys::av_rescale_q(pts, self.time_base, bq);
-                Some(Duration::from_micros(us.max(0).cast_unsigned()))
-            }
-        }
+        let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
+        self.time_base.calc_duration(raw_pts)
     }
 }

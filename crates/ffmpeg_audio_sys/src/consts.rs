@@ -1,4 +1,8 @@
-use super::averror;
+use super::{
+    AV_TIME_BASE,
+    AVRational,
+    averror,
+};
 
 #[must_use]
 pub const fn fferr(tag: &[u8; 4]) -> i32 {
@@ -31,6 +35,12 @@ pub const AVERROR_DECODER_NOT_FOUND: i32 = fferr_f8(b"DEC");
 /// Usually reported by demuxer that work on containers that do not provide
 /// either pts or dts.
 pub const AV_NOPTS_VALUE: i64 = i64::MIN;
+
+/// Internal time base represented as fractional value
+pub const MICROSECONDS_Q: AVRational = AVRational {
+    num: 1,
+    den: AV_TIME_BASE.cast_signed(),
+};
 
 /// FFmpeg Logging Constants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

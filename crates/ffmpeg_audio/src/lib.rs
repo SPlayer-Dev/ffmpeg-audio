@@ -9,6 +9,7 @@ mod frame;
 mod reader;
 mod resampler;
 mod swr;
+mod time;
 
 use std::{
     collections::HashMap,
@@ -32,6 +33,7 @@ pub use resampler::{
     Resampler,
 };
 pub use swr::SwrContext;
+pub use time::TimeBase;
 
 use crate::{
     decoder::Decoder,
