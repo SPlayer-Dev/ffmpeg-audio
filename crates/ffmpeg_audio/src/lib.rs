@@ -18,6 +18,7 @@ use std::{
         Read,
         Seek,
     },
+    ops::Deref,
     time::Duration,
 };
 
@@ -274,6 +275,7 @@ impl AudioReader {
         self.demuxer.cover()
     }
 }
+
 /// A wrapper combining an [`AudioReader`] and a [`Resampler`].
 ///
 /// This provides a streamlined pipeline that automatically handles
@@ -281,6 +283,14 @@ impl AudioReader {
 pub struct ResampledReader {
     reader: AudioReader,
     resampler: Resampler,
+}
+
+impl Deref for ResampledReader {
+    type Target = AudioReader;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reader
+    }
 }
 
 impl ResampledReader {
@@ -295,33 +305,16 @@ impl ResampledReader {
         loop {
             let frame = self.reader.receive_frame()?;
 
-            if let Some(frame) = frame {
-                let has_data = self.resampler.process::<T>(Some(&frame))?;
+            let has_output = self.resampler.process::<T>(frame.as_ref())?;
 
-                if has_data {
-                    return Ok(Some(self.resampler.output_as::<T>()));
-                }
-            } else {
-                let has_data = self.resampler.process::<T>(None)?;
+            if has_output {
+                return Ok(Some(self.resampler.output_as::<T>()));
+            }
 
-                if has_data {
-                    return Ok(Some(self.resampler.output_as::<T>()));
-                }
+            if frame.is_none() {
                 return Ok(None);
             }
         }
-    }
-
-    /// Returns the presentation timestamp (PTS) of the currently decoded frame.
-    #[must_use]
-    pub const fn current_playback_time(&self) -> Option<Duration> {
-        self.reader.current_playback_time()
-    }
-
-    /// Returns the metadata and specifications of the original audio source.
-    #[must_use]
-    pub const fn source_info(&self) -> &SourceAudioInfo {
-        self.reader.source_info()
     }
 
     /// Seeks the underlying audio stream to the specified target duration.
@@ -353,9 +346,9 @@ impl ResampledReader {
     ///     `ffmpeg -f null -`). This is the most accurate method, but consumes significantly
     ///     more CPU and time.
     pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
-        let exact_duration = self.reader.scan_exact_duration(fast_mode)?;
+        let duration = self.reader.scan_exact_duration(fast_mode)?;
         self.resampler.flush()?;
 
-        Ok(exact_duration)
+        Ok(duration)
     }
 }
