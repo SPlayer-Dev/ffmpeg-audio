@@ -15,6 +15,8 @@ impl AudioPipeline {
         decoder: &'a mut Decoder,
         state: &mut PlaybackState,
     ) -> Result<Option<AudioFrame<'a>>> {
+        state.debug_verify();
+
         if state.is_exhausted {
             return Ok(None);
         }
@@ -24,6 +26,8 @@ impl AudioPipeline {
             let frame_ptr = decoder.current_frame();
             let audio_frame = AudioFrame::new(frame_ptr, state.time_base);
             state.current_pts = audio_frame.pts();
+
+            state.debug_verify();
             return Ok(Some(audio_frame));
         }
 
@@ -32,6 +36,8 @@ impl AudioPipeline {
                 Ok(Some(frame)) => {
                     let audio_frame = AudioFrame::new(frame, state.time_base);
                     state.current_pts = audio_frame.pts();
+
+                    state.debug_verify();
                     return Ok(Some(audio_frame));
                 }
                 Err(AudioError::Eagain) => match demuxer.read_packet()? {
@@ -40,6 +46,8 @@ impl AudioPipeline {
                 },
                 Ok(None) => {
                     state.is_exhausted = true;
+
+                    state.debug_verify();
                     return Ok(None);
                 }
                 Err(e) => return Err(e),

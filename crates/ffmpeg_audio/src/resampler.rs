@@ -166,6 +166,12 @@ impl Resampler {
                 )
             };
 
+            debug_assert!(
+                in_samples == 0 || !in_data.is_null(),
+                "in_data is null but in_samples is > 0."
+            );
+            debug_assert!(in_samples >= 0, "in_samples cannot be negative.");
+
             let expected_out_samples = self.swr.get_out_samples(in_samples)?;
             if expected_out_samples <= 0 {
                 self.output_samples = 0;
@@ -180,6 +186,14 @@ impl Resampler {
             self.buffer.reserve_bytes(bytes_needed);
 
             let out_buf_slice = self.buffer.as_uninit_bytes_mut();
+
+            debug_assert!(
+                out_buf_slice.len() >= bytes_needed,
+                "Rust slice length ({}) is smaller than the bytes promised to FFmpeg ({}). Buffer overflow imminent",
+                out_buf_slice.len(),
+                bytes_needed
+            );
+
             let actual_out_samples = self
                 .swr
                 .convert_packed(in_data, in_samples, out_buf_slice)?;

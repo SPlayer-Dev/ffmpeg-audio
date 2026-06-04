@@ -20,8 +20,11 @@ impl SeekEngine {
         source_info: &SourceAudioInfo,
         target: Duration,
     ) -> Result<()> {
+        state.debug_verify();
+
         demuxer.seek_to(target)?;
         decoder.flush();
+
         state.is_exhausted = false;
         state.current_pts = None;
         state.has_buffered_seek_frame = false;
@@ -66,6 +69,8 @@ impl SeekEngine {
         // Eliminate the PTS update side effects resulting from calling `receive_frame` within
         // the decoding loop
         state.current_pts = None;
+
+        state.debug_verify();
         Ok(())
     }
 }
