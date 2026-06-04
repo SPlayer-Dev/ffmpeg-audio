@@ -71,7 +71,7 @@ impl FfErrorExt for c_int {
     /// returned as `Ok(val)`. Negative values are treated as errors and are
     /// mapped to [`AudioError`].
     ///
-    /// ## Errors
+    /// # Errors
     ///
     /// Returns an [`AudioError`] if the underlying FFmpeg operation returns a
     /// negative error code.
@@ -88,13 +88,13 @@ impl FfErrorExt for c_int {
     /// This method handles the [`AVERROR_EOF`](sys::AVERROR_EOF) state by mapping it to `Ok(None)`,
     /// distinguishing expected end-of-stream states from actual fatal errors.
     ///
-    /// ## Returns
+    /// # Returns
     ///
     /// - `Ok(None)` if the return code is [`AVERROR_EOF`](sys::AVERROR_EOF).
     /// - `Ok(Some(val))` if the return code is greater than or equal to `0`.
     /// - `Err(AudioError)` for any other negative return code.
     ///
-    /// ## Errors
+    /// # Errors
     ///
     /// Returns an [`AudioError`] if the underlying FFmpeg operation fails with an
     /// error code other than `AVERROR_EOF`.

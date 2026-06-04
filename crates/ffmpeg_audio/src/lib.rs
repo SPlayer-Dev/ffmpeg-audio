@@ -173,14 +173,14 @@ impl AudioReader {
     /// borrowed [`AudioFrame`] without incurring any redundant decoding or memory
     /// allocation overhead.
     ///
-    /// ## Arguments
+    /// # Arguments
     /// * `options` - The target `ResampleOptions` specifying the desired output
     ///   sample rate, channel count, and data format.
     ///
-    /// ## Returns
+    /// # Returns
     /// * `Ok(Resampler)` - A fully initialized resampler ready to process frames.
     ///
-    /// ## Errors
+    /// # Errors
     /// Returns an [`AudioError`] if the provided `options` are invalid, or if the
     /// internal FFmpeg `SwrContext` allocation and initialization fail.
     pub fn build_resampler(&self, options: ResampleOptions) -> Result<Resampler> {
@@ -199,7 +199,7 @@ impl AudioReader {
     /// [`AudioFrame`] wrapper. You can pass its reference to multiple independent
     /// [`Resampler`] pipelines simultaneously without cloning the underlying audio data.
     ///
-    /// ## Returns
+    /// # Returns
     /// - `Ok(Some(AudioFrame))` if a frame was successfully decoded and is ready for use.
     /// - `Ok(None)` if the end of the audio stream (EOF) has been reached.
     /// - `Err(AudioError)` if an underlying I/O or FFmpeg decoding error occurs.
@@ -453,7 +453,7 @@ impl ResampledReader {
     /// Pulls the next frame of audio data, automatically decoded and
     /// resampled to the target configuration.
     ///
-    /// ## Type Safety
+    /// # Type Safety
     /// The generic type `T` MUST exactly match the format specified in
     /// `ResampleOptions` (e.g., `f32`, `i16`). Otherwise, an
     /// [`AudioError::FormatMismatch`] will be returned.
@@ -505,13 +505,13 @@ impl ResampledReader {
     /// processes the stream to find the true end timestamp. This is useful for
     /// files or formats with no duration information.
     ///
-    /// ## Performance
+    /// # Performance
     /// Because this method performs seeking and flushes the underlying
     /// decoder and resampler states, it is **highly recommended** to call this
     /// method **before** you start pulling frames in your main processing loop.
     /// Calling it mid-playback may cause glitches due to the flushing.
     ///
-    /// ## Parameters
+    /// # Parameters
     /// - `fast_mode`:
     ///   - `true` (Packet-level scan): Rapidly reads raw packets from the demuxer without
     ///     decompressing them. Extremely fast, but relies on the container's timestamps.

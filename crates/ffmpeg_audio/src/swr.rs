@@ -32,7 +32,7 @@ impl SwrContext {
     /// It requires explicit channel layouts, sample formats, and sample rates
     /// for both input and output streams.
     ///
-    /// ## Arguments
+    /// # Arguments
     /// * `out_layout` - The target channel layout.
     /// * `out_sample_fmt` - The target audio sample format.
     /// * `out_sample_rate` - The target sample rate in Hz.
@@ -40,7 +40,7 @@ impl SwrContext {
     /// * `in_sample_fmt` - The source audio sample format.
     /// * `in_sample_rate` - The source sample rate in Hz.
     ///
-    /// ## Errors
+    /// # Errors
     /// Returns an [`AudioError`] if memory allocation fails, initialization fails,
     /// or if the output sample format is invalid/unknown.
     pub fn new(
@@ -99,10 +99,10 @@ impl SwrContext {
     ///
     /// This takes into account any internally buffered samples from previous conversions.
     ///
-    /// ## Arguments
+    /// # Arguments
     /// * `in_samples` - The number of input samples per channel.
     ///
-    /// ## Errors
+    /// # Errors
     /// Returns an [`AudioError`] if the underlying FFmpeg calculation fails.
     pub fn get_out_samples(&self, in_samples: i32) -> Result<i32> {
         unsafe {
@@ -116,7 +116,7 @@ impl SwrContext {
     /// This is typically called after a seek operation or when starting a new stream
     /// to ensure stale data does not bleed into the new output.
     ///
-    /// ## Errors
+    /// # Errors
     /// Returns an [`AudioError`] if re-initialization fails.
     pub fn flush(&mut self) -> Result<()> {
         unsafe {
@@ -130,13 +130,13 @@ impl SwrContext {
     ///
     /// This method is specifically designed for **Packed (Interleaved)** output formats.
     ///
-    /// ## Safety
+    /// # Safety
     /// * `in_data` must be a valid double pointer to the input audio data, and its
     ///   layout must strictly match the `in_sample_fmt` and `in_layout` provided during initialization.
     /// * `in_samples` must accurately reflect the number of samples per channel available in `in_data`.
     /// * To flush the remaining internal buffers (EOF), `in_data` can be `null()` while `in_samples` is `0`.
     ///
-    /// ## Errors
+    /// # Errors
     /// Returns an [`AudioError`] if the output buffer (`out_buf`) is too small to hold
     /// the resampled data, or if the underlying FFmpeg conversion fails.
     pub unsafe fn convert_packed(

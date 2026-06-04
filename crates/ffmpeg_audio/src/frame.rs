@@ -19,7 +19,7 @@ pub struct AudioFrame<'a> {
 impl AudioFrame<'_> {
     /// Creates a new `AudioFrame` wrapper.
     ///
-    /// ## Safety
+    /// # Safety
     /// This method is for internal crate use. The caller ensures that the provided
     /// `ptr` is a valid FFmpeg `AVFrame` and that its memory remains valid for the
     /// duration of the lifetime.
@@ -50,7 +50,7 @@ impl AudioFrame<'_> {
 
     /// Returns the Presentation Timestamp (PTS) of this frame, if available.
     ///
-    /// ## Returns
+    /// # Returns
     /// - `Some(Duration)` representing the exact playback time of the frame.
     /// - `None` if the underlying frame lacks a valid PTS (`AV_NOPTS_VALUE`).
     #[must_use]

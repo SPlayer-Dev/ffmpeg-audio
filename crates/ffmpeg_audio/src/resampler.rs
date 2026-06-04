@@ -139,7 +139,7 @@ impl Resampler {
     /// Passing `None` as the frame will flush any remaining buffered samples
     /// at the end of the stream.
     ///
-    /// ## Returns
+    /// # Returns
     /// - `Ok(true)` if valid data was generated and is ready to be read.
     /// - `Ok(false)` if more input frames are needed to produce an output.
     /// - `Err` if a format mismatch or FFmpeg internal error occurs.

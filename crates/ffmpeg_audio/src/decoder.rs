@@ -57,7 +57,7 @@ impl Decoder {
 
     /// Returns a raw pointer to the current decoded `AVFrame`.
     ///
-    /// ## Safety
+    /// # Safety
     /// This is for internal crate use only. The returned pointer points to the internal
     /// frame buffer managed by this `Decoder` instance. It must not be freed or modified
     /// by the caller, and it remains valid only until the next call to `receive_frame`, `flush`,
