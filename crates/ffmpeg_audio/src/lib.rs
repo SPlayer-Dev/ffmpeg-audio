@@ -6,6 +6,7 @@ mod decoder;
 mod demuxer;
 mod format;
 mod frame;
+mod reader;
 mod resampler;
 mod swr;
 
@@ -36,6 +37,12 @@ use crate::{
     decoder::Decoder,
     demuxer::Demuxer,
     log::init_ffmpeg_logging,
+    reader::{
+        AudioPipeline,
+        DurationScanner,
+        PlaybackState,
+        SeekEngine,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -79,12 +86,7 @@ pub struct SourceAudioInfo {
 pub struct AudioReader {
     decoder: Decoder,
     demuxer: Demuxer,
-    is_exhausted: bool,
-    has_buffered_seek_frame: bool,
-
-    time_base: sys::AVRational,
-    current_pts: Option<Duration>,
-
+    state: PlaybackState,
     source_info: SourceAudioInfo,
 }
 
@@ -150,15 +152,56 @@ impl AudioReader {
             }
         };
 
+        let state = PlaybackState {
+            time_base,
+            current_pts: None,
+            is_exhausted: false,
+            has_buffered_seek_frame: false,
+        };
+
         Ok(Self {
             decoder,
             demuxer,
-            is_exhausted: false,
-            has_buffered_seek_frame: false,
-            time_base,
-            current_pts: None,
+            state,
             source_info,
         })
+    }
+
+    /// Reads and decodes the next available audio frame from the source stream.
+    ///
+    /// This method pulls a packet from the underlying demuxer, sends it to the decoder,
+    /// retrieves the decoded raw frame, and finally returns a safe, zero-copy
+    /// [`AudioFrame`] wrapper. You can pass its reference to multiple independent
+    /// [`Resampler`] pipelines simultaneously without cloning the underlying audio data.
+    ///
+    /// # Returns
+    /// - `Ok(Some(AudioFrame))` if a frame was successfully decoded and is ready for use.
+    /// - `Ok(None)` if the end of the audio stream (EOF) has been reached.
+    /// - `Err(AudioError)` if an underlying I/O or FFmpeg decoding error occurs.
+    pub fn receive_frame(&mut self) -> Result<Option<AudioFrame<'_>>> {
+        AudioPipeline::receive_frame(&mut self.demuxer, &mut self.decoder, &mut self.state)
+    }
+
+    /// Seeks the underlying audio stream to the specified target duration.
+    pub fn seek(&mut self, target: Duration) -> Result<()> {
+        SeekEngine::seek_to(
+            &mut self.demuxer,
+            &mut self.decoder,
+            &mut self.state,
+            &self.source_info,
+            target,
+        )
+    }
+
+    /// Scans the entire audio stream to calculate its exact duration.
+    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
+        DurationScanner::scan_exact(
+            &mut self.demuxer,
+            &mut self.decoder,
+            &mut self.state,
+            &self.source_info,
+            fast_mode,
+        )
     }
 
     /// Builds a [`Resampler`] pipeline tailored to this audio stream.
@@ -192,78 +235,12 @@ impl AudioReader {
         )
     }
 
-    /// Reads and decodes the next available audio frame from the source stream.
-    ///
-    /// This method pulls a packet from the underlying demuxer, sends it to the decoder,
-    /// retrieves the decoded raw frame, and finally returns a safe, zero-copy
-    /// [`AudioFrame`] wrapper. You can pass its reference to multiple independent
-    /// [`Resampler`] pipelines simultaneously without cloning the underlying audio data.
-    ///
-    /// # Returns
-    /// - `Ok(Some(AudioFrame))` if a frame was successfully decoded and is ready for use.
-    /// - `Ok(None)` if the end of the audio stream (EOF) has been reached.
-    /// - `Err(AudioError)` if an underlying I/O or FFmpeg decoding error occurs.
-    pub fn receive_frame(&mut self) -> Result<Option<AudioFrame<'_>>> {
-        if self.is_exhausted {
-            return Ok(None);
-        }
-
-        if self.has_buffered_seek_frame {
-            self.has_buffered_seek_frame = false;
-            let frame_ptr = self.decoder.current_frame();
-            let audio_frame = AudioFrame::new(frame_ptr, self.time_base);
-            self.current_pts = audio_frame.pts();
-
-            return Ok(Some(audio_frame));
-        }
-
-        loop {
-            match self.decoder.receive_frame() {
-                Ok(Some(frame)) => {
-                    unsafe {
-                        let pts = (*frame).pts;
-                        if pts != sys::AV_NOPTS_VALUE {
-                            let bq = sys::AVRational {
-                                num: 1,
-                                den: sys::AV_TIME_BASE.cast_signed(),
-                            };
-                            let us = sys::av_rescale_q(pts, self.time_base, bq);
-                            self.current_pts =
-                                Some(Duration::from_micros(us.max(0).cast_unsigned()));
-                        }
-                    }
-
-                    return Ok(Some(AudioFrame::new(frame, self.time_base)));
-                }
-                Err(AudioError::Eagain) => match self.demuxer.read_packet()? {
-                    Some(packet) => {
-                        self.decoder.send_packet(packet)?;
-                    }
-                    None => {
-                        self.decoder.send_eof_flush()?;
-                    }
-                },
-                Ok(None) => {
-                    self.is_exhausted = true;
-                    return Ok(None);
-                }
-                Err(e) => return Err(e),
-            }
-        }
-    }
-
     /// Consumes the current [`AudioReader`] and wraps it in a [`ResampledReader`]
     /// using the provided resampling configuration.
     ///
     /// This establishes a pipeline from decoding to resampling, ready for data extraction.
     pub fn into_resampled(self, options: ResampleOptions) -> Result<ResampledReader> {
-        let resampler = Resampler::new(
-            &self.decoder.channel_layout(),
-            self.decoder.sample_fmt(),
-            self.decoder.sample_rate(),
-            options,
-        )?;
-
+        let resampler = self.build_resampler(options)?;
         Ok(ResampledReader {
             reader: self,
             resampler,
@@ -272,7 +249,7 @@ impl AudioReader {
 
     #[must_use]
     pub const fn current_playback_time(&self) -> Option<Duration> {
-        self.current_pts
+        self.state.current_pts
     }
 
     #[must_use]
@@ -290,156 +267,11 @@ impl AudioReader {
         self.demuxer.duration()
     }
 
-    /// Scans the entire audio stream to calculate its exact duration.
-    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
-        let original_position = self.current_playback_time().unwrap_or(Duration::ZERO);
-
-        self.seek(Duration::ZERO)?;
-
-        let mut max_pts_us: Option<i64> = None;
-        let mut last_frame_duration_us: i64 = 0;
-        let mut total_samples_fallback: usize = 0;
-        let mut scan_error = None;
-
-        if fast_mode {
-            loop {
-                match self.demuxer.read_packet() {
-                    Ok(Some(packet)) => unsafe {
-                        let pts = (*packet).pts;
-                        if pts != sys::AV_NOPTS_VALUE {
-                            let duration = (*packet).duration;
-
-                            let end_pts = if duration > 0 {
-                                pts.saturating_add(duration)
-                            } else {
-                                pts
-                            };
-
-                            let bq = sys::AVRational {
-                                num: 1,
-                                den: sys::AV_TIME_BASE.cast_signed(),
-                            };
-                            let end_us = sys::av_rescale_q(end_pts, self.time_base, bq);
-
-                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(end_us));
-                        }
-                    },
-                    Ok(None) => break,
-                    Err(e) => {
-                        scan_error = Some(e);
-                        break;
-                    }
-                }
-            }
-        } else {
-            let sample_rate = f64::from(self.source_info.sample_rate);
-
-            loop {
-                match self.receive_frame() {
-                    Ok(Some(frame)) => {
-                        let samples = frame.samples();
-                        total_samples_fallback += samples;
-
-                        if let Some(pts) = frame.pts() {
-                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(pts.as_micros() as i64));
-                        }
-
-                        if sample_rate > 0.0 {
-                            let duration_secs = samples as f64 / sample_rate;
-                            last_frame_duration_us = (duration_secs * 1_000_000.0) as i64;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        scan_error = Some(e);
-                        break;
-                    }
-                }
-            }
-        }
-
-        self.seek(original_position)?;
-
-        if let Some(e) = scan_error {
-            return Err(e);
-        }
-
-        if let Some(pts) = max_pts_us {
-            // located a valid timestamp, and add the physical duration of the final frame
-            let total_us = pts.saturating_add(last_frame_duration_us);
-            Ok(Some(Duration::from_micros(total_us.max(0) as u64)))
-        } else if !fast_mode && total_samples_fallback > 0 && self.source_info.sample_rate > 0 {
-            // The entire file contains no PTS, yet we successfully decoded the sample waveform
-            // We calculate the absolute duration by dividing the total number of physical samples
-            // by the sampling rate
-            let duration_secs =
-                total_samples_fallback as f64 / f64::from(self.source_info.sample_rate);
-            Ok(Some(Duration::from_secs_f64(duration_secs)))
-        } else {
-            // Empty file, or no timestamped packets found in Fast Mode
-            Ok(None)
-        }
-    }
-
     #[must_use]
     pub fn cover(&self) -> Option<AudioCover> {
         self.demuxer.cover()
     }
-
-    /// Seeks the underlying audio stream to the specified target duration.
-    pub fn seek(&mut self, target: Duration) -> Result<()> {
-        self.demuxer.seek_to(target)?;
-        self.decoder.flush();
-        self.is_exhausted = false;
-        self.current_pts = None;
-        self.has_buffered_seek_frame = false;
-
-        let target_us = target.as_micros() as i64;
-        let sample_rate = f64::from(self.source_info.sample_rate);
-
-        // Decode and discard frames until reaching the target
-        // Prevents ffmpeg from jumping to the keyframe preceding the target position,
-        // avoiding playback lag.
-        loop {
-            match self.receive_frame() {
-                Ok(Some(frame)) => {
-                    if let Some(pts) = frame.pts() {
-                        let pts_us = pts.as_micros() as i64;
-
-                        let duration_us = if sample_rate > 0.0 {
-                            (frame.samples() as f64 / sample_rate * 1_000_000.0) as i64
-                        } else {
-                            0
-                        };
-
-                        // If the end time of the current frame surpasses the target timestamp,
-                        // this frame contains or immediately follows the exact target playback position
-                        if pts_us + duration_us >= target_us {
-                            // Buffer this frame so it can be immediately consumed by the next
-                            // external call to `receive_frame`
-                            self.has_buffered_seek_frame = true;
-                            break;
-                        }
-                    } else {
-                        // If a frame lacks a valid PTS, stop discarding immediately
-                        // to prevent accidentally consuming and exhausting the entire stream.
-                        self.has_buffered_seek_frame = true;
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => return Err(e),
-            }
-        }
-
-        // Eliminate the PTS update side effects resulting from calling `receive_frame` within
-        // the decoding loop
-        self.current_pts = None;
-
-        Ok(())
-    }
 }
-
 /// A wrapper combining an [`AudioReader`] and a [`Resampler`].
 ///
 /// This provides a streamlined pipeline that automatically handles
