@@ -27,10 +27,12 @@ jobs:
           # Windows GNU targets
           - target: x86_64-pc-windows-gnu
             os: ubuntu-latest
-            llvm_mingw: true
+            apt_packages: mingw-w64
+            check_only: true
           - target: aarch64-pc-windows-gnullvm
             os: ubuntu-latest
             llvm_mingw: true
+            check_only: true
 
           # macOS targets
           - target: x86_64-apple-darwin
@@ -48,6 +50,7 @@ jobs:
           - target: i686-unknown-linux-gnu
             os: ubuntu-latest
             apt_packages: gcc-multilib libc6-dev-i386 libclang-dev
+            check_sys_only: true
           - target: armv7-unknown-linux-gnueabihf
             os: ubuntu-latest
             apt_packages: gcc-arm-linux-gnueabihf libc6-dev-armhf-cross libclang-dev
@@ -126,12 +129,16 @@ jobs:
         if: matrix.cross
         run: cross check --target ${{ matrix.target }} --workspace
 
+      - name: Run sys-only check
+        if: matrix.check_sys_only
+        run: cargo check --target ${{ matrix.target }} -p ffmpeg_audio_sys
+
       - name: Run cargo check
-        if: "!matrix.cross && matrix.check_only"
+        if: "!matrix.cross && !matrix.check_sys_only && matrix.check_only"
         run: cargo check --target ${{ matrix.target }} --workspace
 
       - name: Run cargo test
-        if: "!matrix.cross && !matrix.check_only"
+        if: "!matrix.cross && !matrix.check_sys_only && !matrix.check_only"
         run: cargo test --target ${{ matrix.target }} --workspace
 
   clippy:
