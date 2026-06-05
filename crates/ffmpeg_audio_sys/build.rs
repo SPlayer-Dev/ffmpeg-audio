@@ -45,10 +45,15 @@ mod utils {
             ("ios" | "tvos" | "watchos" | "visionos", "aarch64", _, "sim" | "macabi") => "build_out_macos_arm64",
             ("ios" | "tvos" | "watchos" | "visionos", "aarch64", _, _) => "build_out_ios_arm64",
 
-            ("linux", "aarch64", _, _)   => "build_out_linux_arm64",
-            ("linux", "x86_64", _, _)    => "build_out_linux_x86_64",
+            ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "aarch64", _, _) => "build_out_linux_arm64",
+            ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "x86_64", _, _)  => "build_out_linux_x86_64",
+            ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "x86", _, _)     => "build_out_linux_x86",
+            ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "arm", _, _)     => "build_out_linux_armv7",
 
-            ("emscripten", "wasm32", _, _) => "build_out_emscripten_wasm32",
+            (_, "riscv32" | "riscv64" | "loongarch64" | "powerpc" | "s390x" | "mips" | "mips64", _, _) => panic!("Architecture {arch} requires a dedicated FFmpeg configuration."),
+            ("none" | "unknown", _, _, _) => panic!("Bare-metal or unknown OS targets are not supported."),
+
+            ("emscripten" | "wasi", "wasm32", _, _) => "build_out_emscripten_wasm32",
 
             _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}, Env: {target_env}, ABI: {target_abi}"),
         }
@@ -89,13 +94,20 @@ mod utils {
 
     pub fn emit_link_libs() {
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-        if target_os == "android" {
-            println!("cargo:rustc-link-lib=m");
-        } else if target_os == "linux" || target_os == "macos" || target_os == "ios" {
-            println!("cargo:rustc-link-lib=m");
-            println!("cargo:rustc-link-lib=pthread");
-        } else if target_os == "windows" {
-            println!("cargo:rustc-link-lib=bcrypt");
+
+        match target_os.as_str() {
+            "android" => {
+                println!("cargo:rustc-link-lib=m");
+            }
+            "linux" | "macos" | "ios" | "tvos" | "watchos" | "visionos" | "freebsd" | "netbsd"
+            | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox" => {
+                println!("cargo:rustc-link-lib=m");
+                println!("cargo:rustc-link-lib=pthread");
+            }
+            "windows" => {
+                println!("cargo:rustc-link-lib=bcrypt");
+            }
+            _ => {}
         }
     }
 

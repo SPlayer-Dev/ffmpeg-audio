@@ -192,8 +192,23 @@ if (targetOs === "windows") {
 			"--cc=aarch64-linux-gnu-gcc",
 		);
 		targetArch = "arm64";
-	} else {
+	} else if (targetArch === "armv7") {
+		options.push(
+			"--arch=arm",
+			"--enable-cross-compile",
+			"--cc=arm-linux-gnueabihf-gcc",
+		);
+	} else if (targetArch === "x86") {
+		options.push(
+			"--arch=x86",
+			"--enable-cross-compile",
+			"--cc=i686-linux-gnu-gcc",
+		);
+	} else if (targetArch === "x86_64") {
 		options.push(`--arch=${targetArch}`);
+	} else {
+		console.error(`不支持的 Linux 架构: ${targetArch}`);
+		Deno.exit(1);
 	}
 } else if (targetOs === "android") {
 	options.push("--target-os=android", "--enable-cross-compile");
