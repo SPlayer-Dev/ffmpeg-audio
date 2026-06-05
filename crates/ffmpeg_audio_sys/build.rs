@@ -30,10 +30,10 @@ mod utils {
             ("windows", "x86_64", "msvc", _)  => "build_out_windows_x86_64",
             ("windows", "x86", "msvc", _)     => "build_out_windows_x86",
 
-            ("windows", "aarch64", "gnu" | "gnullvm", _) => "build_out_windows_gnu_aarch64",
-            ("windows", "x86_64", "gnu" | "gnullvm", _)  => "build_out_windows_gnu_x86_64",
-            ("windows", "x86", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_x86",
-            ("windows", "arm", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_arm",
+            ("windows", "aarch64", "gnu" | "gnullvm", _) => "build_out_windows-gnu_aarch64",
+            ("windows", "x86_64", "gnu" | "gnullvm", _)  => "build_out_windows-gnu_x86_64",
+            ("windows", "x86", "gnu" | "gnullvm", _)     => "build_out_windows-gnu_x86",
+            ("windows", "arm", "gnu" | "gnullvm", _)     => "build_out_windows-gnu_arm",
             ("windows", _, _, _)                         => "build_out_windows_x86_64",
 
             ("android", "aarch64", _, _) => "build_out_android_arm64-v8a",
