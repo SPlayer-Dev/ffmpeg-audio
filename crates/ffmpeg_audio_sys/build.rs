@@ -17,28 +17,35 @@ mod utils {
     pub fn get_config_dir_name() -> &'static str {
         let os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
         let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH not set");
+        let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
 
-        match (os.as_str(), arch.as_str()) {
-            ("windows", "aarch64") => "build_out_windows_arm64",
-            ("windows", "x86_64")  => "build_out_windows_x86_64",
-            ("windows", "x86")     => "build_out_windows_x86",
+        match (os.as_str(), arch.as_str(), target_env.as_str()) {
+            ("windows", "aarch64", "msvc") => "build_out_windows_arm64",
+            ("windows", "x86_64", "msvc")  => "build_out_windows_x86_64",
+            ("windows", "x86", "msvc")     => "build_out_windows_x86",
 
-            ("android", "aarch64") => "build_out_android_arm64-v8a",
-            ("android", "arm")     => "build_out_android_armeabi-v7a",
-            ("android", "x86")     => "build_out_android_x86",
-            ("android", "x86_64")  => "build_out_android_x86_64",
+            ("windows", "aarch64", "gnu" | "gnullvm") => "build_out_windows_gnu_aarch64",
+            ("windows", "x86_64", "gnu" | "gnullvm")  => "build_out_windows_gnu_x86_64",
+            ("windows", "x86", "gnu" | "gnullvm")     => "build_out_windows_gnu_x86",
+            ("windows", "arm", "gnu" | "gnullvm")     => "build_out_windows_gnu_arm",
+            
+            ("windows", _, _) => panic!("Unsupported Windows environment/arch combination. Arch: {arch}, Env: {target_env}"),
 
-            ("ios", "aarch64")     => "build_out_ios_arm64",
+            ("android", "aarch64", _) => "build_out_android_arm64-v8a",
+            ("android", "arm", _)     => "build_out_android_armeabi-v7a",
+            ("android", "x86", _)     => "build_out_android_x86",
+            ("android", "x86_64", _)  => "build_out_android_x86_64",
 
-            ("macos", "aarch64")   => "build_out_macos_arm64",
-            ("macos", "x86_64")    => "build_out_macos_x86_64",
+            ("ios", "aarch64", _)     => "build_out_ios_arm64",
+            ("macos", "aarch64", _)   => "build_out_macos_arm64",
+            ("macos", "x86_64", _)    => "build_out_macos_x86_64",
 
-            ("linux", "aarch64")   => "build_out_linux_arm64",
-            ("linux", "x86_64")    => "build_out_linux_x86_64",
+            ("linux", "aarch64", _)   => "build_out_linux_arm64",
+            ("linux", "x86_64", _)    => "build_out_linux_x86_64",
 
-            ("emscripten", "wasm32") => "build_out_emscripten_wasm32",
+            ("emscripten", "wasm32", _) => "build_out_emscripten_wasm32",
 
-            _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}"),
+            _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}, Env: {target_env}"),
         }
     }
 
@@ -110,7 +117,10 @@ mod bundled {
         collections::BTreeSet,
         env,
         fs,
-        path::Path,
+        path::{
+            Path,
+            PathBuf,
+        },
     };
 
     use crate::utils;
@@ -157,15 +167,36 @@ mod bundled {
         }
     }
 
-    pub fn build(manifest_dir: &Path, out_dir: &Path) {
-        // 优先使用 vendor/ 下已解压的目录，方便直接修改 C 源码进行调试
+    struct BuildMeta {
+        c_files: BTreeSet<String>,
+        defines: BTreeSet<(String, Option<String>)>,
+        includes: BTreeSet<String>,
+    }
+
+    pub fn build(manifest_dir: &Path, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
+        let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+        let (ffmpeg_dir, configs_base) = prepare_sources(manifest_dir, out_dir)?;
+        let (build_meta, config_dir) = parse_compiler_meta(&ffmpeg_dir, &configs_base)?;
+
+        compile_ffmpeg_audio(&ffmpeg_dir, &config_dir, &build_meta, &os, &target_env);
+        generate_bindings(&ffmpeg_dir, &config_dir, &build_meta, out_dir)?;
+
+        Ok(())
+    }
+
+    fn prepare_sources(
+        manifest_dir: &Path,
+        out_dir: &Path,
+    ) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
         let vendor_ffmpeg = manifest_dir.join("vendor").join("ffmpeg_slim");
         let vendor_configs = manifest_dir.join("vendor").join("configs");
 
-        let (ffmpeg_dir, configs_base) = if vendor_ffmpeg.exists() && vendor_configs.exists() {
+        if vendor_ffmpeg.exists() && vendor_configs.exists() {
             println!("cargo:rerun-if-changed=vendor/ffmpeg_slim");
             println!("cargo:rerun-if-changed=vendor/configs");
-            (vendor_ffmpeg, vendor_configs)
+            Ok((vendor_ffmpeg, vendor_configs))
         } else {
             let slim_zip = manifest_dir.join("vendor").join("ffmpeg_slim.zip");
             let configs_zip = manifest_dir.join("vendor").join("configs.zip");
@@ -178,112 +209,157 @@ mod bundled {
 
             if !ffmpeg_dir.exists() {
                 utils::extract_zip(&slim_zip, &ffmpeg_dir)
-                    .unwrap_or_else(|e| panic!("解压 ffmpeg_slim.zip 失败: {e}"));
+                    .map_err(|e| format!("解压 ffmpeg_slim.zip 失败: {e}"))?;
             }
             if !configs_base.exists() {
                 utils::extract_zip(&configs_zip, &configs_base)
-                    .unwrap_or_else(|e| panic!("解压 configs.zip 失败: {e}"));
+                    .map_err(|e| format!("解压 configs.zip 失败: {e}"))?;
             }
-            (ffmpeg_dir, configs_base)
-        };
+            Ok((ffmpeg_dir, configs_base))
+        }
+    }
 
+    fn parse_compiler_meta(
+        ffmpeg_dir: &Path,
+        configs_base: &Path,
+    ) -> Result<(BuildMeta, PathBuf), Box<dyn std::error::Error>> {
         let config_dir_name = utils::get_config_dir_name();
         let config_dir = configs_base.join(config_dir_name);
         let log_path = config_dir.join("make_dryrun.log");
 
         println!("cargo:rerun-if-changed={}", log_path.display());
 
-        let log_content = fs::read_to_string(&log_path).unwrap_or_else(|_| {
-            panic!(
+        let log_content = fs::read_to_string(&log_path).map_err(|_| {
+            format!(
                 "无法读取日志文件: {}.\n请确认该目标平台的配置已包含在 configs.zip 中。",
                 log_path.display()
             )
-        });
+        })?;
 
-        let mut c_files: BTreeSet<String> = BTreeSet::new();
-        let mut defines: BTreeSet<(String, Option<String>)> = BTreeSet::new();
-        let mut includes: BTreeSet<String> = BTreeSet::new();
+        let mut c_files = BTreeSet::new();
+        let mut defines = BTreeSet::new();
+        let mut includes = BTreeSet::new();
 
         for line in log_content.lines() {
-            parse_log_line(line, &ffmpeg_dir, &mut defines, &mut includes, &mut c_files);
+            parse_log_line(line, ffmpeg_dir, &mut defines, &mut includes, &mut c_files);
         }
 
+        Ok((
+            BuildMeta {
+                c_files,
+                defines,
+                includes,
+            },
+            config_dir,
+        ))
+    }
+
+    fn compile_ffmpeg_audio(
+        ffmpeg_dir: &Path,
+        config_dir: &Path,
+        meta: &BuildMeta,
+        os: &str,
+        target_env: &str,
+    ) {
         let mut build = cc::Build::new();
-        build.include(&ffmpeg_dir);
-        build.include(&config_dir);
+
+        build.include(ffmpeg_dir);
+        build.include(config_dir);
         build.include(ffmpeg_dir.join("libavcodec"));
         build.include(ffmpeg_dir.join("libavformat"));
         build.include(ffmpeg_dir.join("libswresample"));
 
-        for inc in &includes {
+        for inc in &meta.includes {
             build.include(inc);
         }
-        for (k, v) in &defines {
+        for (k, v) in &meta.defines {
             build.define(k, v.as_deref());
         }
-        for file in &c_files {
+        for file in &meta.c_files {
             build.file(ffmpeg_dir.join(file));
         }
 
-        if env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+        if os == "windows" && target_env == "msvc" {
             build.flag("/utf-8");
         }
         build.warnings(false);
         build.compile("ffmpeg_audio");
 
         utils::emit_link_libs();
+    }
 
+    fn generate_bindings(
+        ffmpeg_dir: &Path,
+        config_dir: &Path,
+        meta: &BuildMeta,
+        out_dir: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed=wrapper.h");
 
         let mut builder = utils::create_base_bindings()
             .clang_arg(format!("-I{}", ffmpeg_dir.display()))
             .clang_arg(format!("-I{}", config_dir.display()));
 
-        let target = env::var("TARGET").unwrap();
+        let target = env::var("TARGET")?;
         builder = builder.clang_arg(format!("--target={target}"));
 
-        if env::var("CARGO_CFG_TARGET_OS").unwrap() == "emscripten" {
-            // Clang defaults to hidden visibility for the wasm32 target, which
-            // causes bindgen to silently skip all extern function declarations.
-            // Overriding to "default" restores normal linkage visibility so that
-            // bindgen emits the expected `extern "C"` function blocks.
-            builder = builder.clang_arg("-fvisibility=default");
-
-            // Emscripten uses musl libc which lacks glibc's __UINT8_C / __UINT16_C / __UINT64_C macros.
-            builder = builder
-                .clang_arg("-D__UINT8_C(c)=c")
-                .clang_arg("-D__UINT16_C(c)=c")
-                .clang_arg("-D__UINT32_C(c)=c ## U")
-                .clang_arg("-D__UINT64_C(c)=c ## ULL")
-                .clang_arg("-D__INT8_C(c)=c")
-                .clang_arg("-D__INT16_C(c)=c")
-                .clang_arg("-D__INT32_C(c)=c")
-                .clang_arg("-D__INT64_C(c)=c ## LL")
-                .clang_arg("-D__INTMAX_C(c)=c ## LL")
-                .clang_arg("-D__UINTMAX_C(c)=c ## ULL")
-                .clang_arg("-D__SIZE_C(c)=c ## UL")
-                .clang_arg("-D__PTRDIFF_C(c)=c ## L");
-
-            if let Ok(emsdk) = env::var("EMSDK") {
-                let sysroot = format!("{emsdk}/upstream/emscripten/cache/sysroot");
-                builder = builder.clang_arg(format!("--sysroot={sysroot}"));
-            } else {
-                println!("cargo:warning=未检测到 EMSDK 环境变量，bindgen 可能无法找到头文件");
-            }
+        if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "emscripten" {
+            builder = configure_emscripten(builder);
         }
 
-        for inc in &includes {
+        for inc in &meta.includes {
             builder = builder.clang_arg(format!("-I{inc}"));
         }
-        for (k, v) in defines {
-            builder =
-                builder.clang_arg(v.map_or_else(|| format!("-D{k}"), |val| format!("-D{k}={val}")));
+        for (k, v) in &meta.defines {
+            builder = builder.clang_arg(
+                v.as_deref()
+                    .map_or_else(|| format!("-D{k}"), |val| format!("-D{k}={val}")),
+            );
         }
 
-        let bindings = builder.generate().expect("无法生成 FFmpeg 绑定");
+        let bindings = builder.generate().map_err(|_| "无法生成 FFmpeg 绑定")?;
         bindings
             .write_to_file(out_dir.join("bindings.rs"))
-            .expect("无法写入 bindings.rs");
+            .map_err(|_| "无法写入 bindings.rs")?;
+
+        Ok(())
+    }
+
+    fn configure_emscripten(mut builder: bindgen::Builder) -> bindgen::Builder {
+        // Clang defaults to hidden visibility for the wasm32 target, which
+        // causes bindgen to silently skip all extern function declarations.
+        // Overriding to "default" restores normal linkage visibility so that
+        // bindgen emits the expected `extern "C"` function blocks.
+        builder = builder.clang_arg("-fvisibility=default");
+
+        // Emscripten uses musl libc which lacks glibc's __UINT8_C / __UINT16_C / __UINT64_C macros.
+        let sysroot_macros = [
+            "-D__UINT8_C(c)=c",
+            "-D__UINT16_C(c)=c",
+            "-D__UINT32_C(c)=c ## U",
+            "-D__UINT64_C(c)=c ## ULL",
+            "-D__INT8_C(c)=c",
+            "-D__INT16_C(c)=c",
+            "-D__INT32_C(c)=c",
+            "-D__INT64_C(c)=c ## LL",
+            "-D__INTMAX_C(c)=c ## LL",
+            "-D__UINTMAX_C(c)=c ## ULL",
+            "-D__SIZE_C(c)=c ## UL",
+            "-D__PTRDIFF_C(c)=c ## L",
+        ];
+
+        for &marg in &sysroot_macros {
+            builder = builder.clang_arg(marg);
+        }
+
+        if let Ok(emsdk) = env::var("EMSDK") {
+            let sysroot = format!("{emsdk}/upstream/emscripten/cache/sysroot");
+            builder = builder.clang_arg(format!("--sysroot={sysroot}"));
+        } else {
+            println!("cargo:warning=未检测到 EMSDK 环境变量，bindgen 可能无法找到头文件");
+        }
+
+        builder
     }
 }
 
@@ -355,7 +431,7 @@ fn main() {
     let vendor_configs = manifest_dir.join("vendor").join("configs");
 
     if slim_zip.exists() || (vendor_ffmpeg.exists() && vendor_configs.exists()) {
-        bundled::build(&manifest_dir, &out_dir);
+        bundled::build(&manifest_dir, &out_dir).expect("构建内置 FFmpeg 时出错");
     } else {
         system::build(&out_dir, &target_os);
     }

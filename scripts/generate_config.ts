@@ -166,6 +166,23 @@ if (targetOs === "windows") {
 		Deno.exit(1);
 	}
 	options.push("--extra-cflags=-DHAVE_UNISTD_H=0");
+} else if (targetOs === "windows_gnu") {
+	options.push("--target-os=mingw32", "--enable-cross-compile");
+
+	if (targetArch === "x86_64") {
+		options.push("--arch=x86_64", "--cc=x86_64-w64-mingw32-clang");
+	} else if (targetArch === "x86") {
+		options.push("--arch=x86", "--cc=i686-w64-mingw32-clang");
+	} else if (targetArch === "aarch64" || targetArch === "arm64") {
+		options.push("--arch=aarch64", "--cc=aarch64-w64-mingw32-clang");
+		targetArch = "aarch64";
+	} else if (targetArch === "arm" || targetArch === "armv7") {
+		options.push("--arch=arm", "--cc=armv7-w64-mingw32-clang");
+		targetArch = "arm";
+	} else {
+		console.error(`不支持的 Windows GNU 架构: ${targetArch}`);
+		Deno.exit(1);
+	}
 } else if (targetOs === "linux") {
 	options.push("--target-os=linux");
 	if (targetArch === "arm64" || targetArch === "aarch64") {

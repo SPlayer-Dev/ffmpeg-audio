@@ -26,6 +26,14 @@ jobs:
             arch: x86_64
           - os: linux
             arch: arm64
+          - os: windows-gnu
+            arch: x86_64
+          - os: windows-gnu
+            arch: x86
+          - os: windows-gnu
+            arch: aarch64
+          - os: windows-gnu
+            arch: arm
           - os: emscripten
             arch: wasm32
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
@@ -47,6 +55,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu make
+
+      - name: Install LLVM-MinGW for Windows-GNU targets
+        if: matrix.os == 'windows-gnu'
+        run: |
+          wget https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz
+          echo "$(pwd)/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_PATH
 
       - name: Clone FFmpeg
         run: |
