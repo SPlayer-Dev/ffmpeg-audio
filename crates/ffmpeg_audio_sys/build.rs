@@ -14,38 +14,43 @@ mod utils {
     };
 
     #[rustfmt::skip]
+    #[allow(clippy::match_same_arms)]
     pub fn get_config_dir_name() -> &'static str {
         let os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
         let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH not set");
         let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
 
-        match (os.as_str(), arch.as_str(), target_env.as_str()) {
-            ("windows", "aarch64", "msvc") => "build_out_windows_arm64",
-            ("windows", "x86_64", "msvc")  => "build_out_windows_x86_64",
-            ("windows", "x86", "msvc")     => "build_out_windows_x86",
+        match (os.as_str(), arch.as_str(), target_env.as_str(), target_abi.as_str()) {
+            ("windows", "aarch64", "msvc", _) => "build_out_windows_arm64",
+            ("windows", "x86_64", "msvc", _)  => "build_out_windows_x86_64",
+            ("windows", "x86", "msvc", _)     => "build_out_windows_x86",
 
-            ("windows", "aarch64", "gnu" | "gnullvm") => "build_out_windows_gnu_aarch64",
-            ("windows", "x86_64", "gnu" | "gnullvm")  => "build_out_windows_gnu_x86_64",
-            ("windows", "x86", "gnu" | "gnullvm")     => "build_out_windows_gnu_x86",
-            ("windows", "arm", "gnu" | "gnullvm")     => "build_out_windows_gnu_arm",
+            ("windows", "aarch64", "gnu" | "gnullvm", _) => "build_out_windows_gnu_aarch64",
+            ("windows", "x86_64", "gnu" | "gnullvm", _)  => "build_out_windows_gnu_x86_64",
+            ("windows", "x86", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_x86",
+            ("windows", "arm", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_arm",
             
-            ("windows", _, _) => panic!("Unsupported Windows environment/arch combination. Arch: {arch}, Env: {target_env}"),
+            ("windows", _, _, _) => panic!("Unsupported Windows combination. Arch: {arch}, Env: {target_env}"),
 
-            ("android", "aarch64", _) => "build_out_android_arm64-v8a",
-            ("android", "arm", _)     => "build_out_android_armeabi-v7a",
-            ("android", "x86", _)     => "build_out_android_x86",
-            ("android", "x86_64", _)  => "build_out_android_x86_64",
+            ("android", "aarch64", _, _) => "build_out_android_arm64-v8a",
+            ("android", "arm", _, _)     => "build_out_android_armeabi-v7a",
+            ("android", "x86", _, _)     => "build_out_android_x86",
+            ("android", "x86_64", _, _)  => "build_out_android_x86_64",
 
-            ("ios", "aarch64", _)     => "build_out_ios_arm64",
-            ("macos", "aarch64", _)   => "build_out_macos_arm64",
-            ("macos", "x86_64", _)    => "build_out_macos_x86_64",
+            ("macos", "aarch64", _, _) => "build_out_macos_arm64",
+            ("macos", "x86_64", _, _)  => "build_out_macos_x86_64",
 
-            ("linux", "aarch64", _)   => "build_out_linux_arm64",
-            ("linux", "x86_64", _)    => "build_out_linux_x86_64",
+            ("ios" | "tvos" | "watchos" | "visionos", "x86_64", _, _) => "build_out_macos_x86_64",
+            ("ios" | "tvos" | "watchos" | "visionos", "aarch64", _, "sim" | "macabi") => "build_out_macos_arm64",
+            ("ios" | "tvos" | "watchos" | "visionos", "aarch64", _, _) => "build_out_ios_arm64",
 
-            ("emscripten", "wasm32", _) => "build_out_emscripten_wasm32",
+            ("linux", "aarch64", _, _)   => "build_out_linux_arm64",
+            ("linux", "x86_64", _, _)    => "build_out_linux_x86_64",
 
-            _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}, Env: {target_env}"),
+            ("emscripten", "wasm32", _, _) => "build_out_emscripten_wasm32",
+
+            _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}, Env: {target_env}, ABI: {target_abi}"),
         }
     }
 
