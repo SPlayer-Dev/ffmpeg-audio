@@ -166,7 +166,7 @@ if (targetOs === "windows") {
 		Deno.exit(1);
 	}
 	options.push("--extra-cflags=-DHAVE_UNISTD_H=0");
-} else if (targetOs === "windows_gnu") {
+} else if (targetOs === "windows-gnu") {
 	options.push("--target-os=mingw32", "--enable-cross-compile");
 
 	if (targetArch === "x86_64") {
