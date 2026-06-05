@@ -47,10 +47,10 @@ jobs:
             check_only: true
           - target: i686-unknown-linux-gnu
             os: ubuntu-latest
-            cross: true
+            apt_packages: gcc-multilib libc6-dev-i386 libclang-dev
           - target: armv7-unknown-linux-gnueabihf
             os: ubuntu-latest
-            cross: true
+            apt_packages: gcc-arm-linux-gnueabihf libc6-dev-armhf-cross libclang-dev
             check_only: true
 
           # Android targets
