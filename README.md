@@ -63,21 +63,19 @@ while let Some(samples) = resampled.receive_frame_as::<f32>()? {
 
 ## Supported Platforms
 
-* `x86_64-pc-windows-msvc`
-* `i686-pc-windows-msvc`
-* `aarch64-pc-windows-msvc`
-* `aarch64-linux-android`
-* `armv7-linux-androideabi`
-* `i686-linux-android`
-* `x86_64-linux-android`
-* `aarch64-apple-darwin`
-* `x86_64-apple-darwin`
-* `x86_64-unknown-linux-gnu`
-* `aarch64-unknown-linux-gnu`
-* `aarch64-apple-ios`
-* `wasm32-unknown-emscripten`
+This crate covers **all Rust [Tier 1](https://doc.rust-lang.org/rustc/platform-support.html#tier-1-with-host-tools) targets** and most mainstream Tier 2 targets. Highlights include:
 
-Other target platforms are not currently supported.
+* **Windows** — MSVC & GNU toolchains (`x86_64`, `x86`, `aarch64`, `arm`)
+* **Linux / BSD** — `x86_64`, `x86`, `aarch64`, `armv7` (including FreeBSD, NetBSD, OpenBSD, and more)
+* **macOS** — `x86_64` & `aarch64`
+* **iOS / tvOS / watchOS / visionOS** — `aarch64` (device & simulator), `x86_64` (simulator)
+* **Android** — `aarch64`, `armv7`, `x86`, `x86_64`
+* **WebAssembly** — `wasm32-unknown-emscripten` (note: `wasm32-unknown-unknown` is **not** supported)
+
+For the full list of supported target triples, see [`get_config_dir_name()`](./crates/ffmpeg_audio_sys/build.rs).
+
+> [!WARNING]
+> Building for a target triple not listed in [`get_config_dir_name()`](./crates/ffmpeg_audio_sys/build.rs) might fail at compile time, or cause a runtime UB.
 
 ## Examples
 
