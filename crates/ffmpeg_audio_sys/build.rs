@@ -15,13 +15,17 @@ mod utils {
 
     #[rustfmt::skip]
     #[allow(clippy::match_same_arms)]
-    pub fn get_config_dir_name() -> &'static str {
+    pub fn get_config_dir_name() -> String {
+        if let Ok(override_dir) = env::var("FFMPEG_CUSTOM_CONFIG") {
+            return override_dir;
+        }
+
         let os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS not set");
         let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH not set");
         let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
         let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
 
-        match (os.as_str(), arch.as_str(), target_env.as_str(), target_abi.as_str()) {
+        let matched_dir = match (os.as_str(), arch.as_str(), target_env.as_str(), target_abi.as_str()) {
             ("windows", "aarch64", "msvc", _) => "build_out_windows_arm64",
             ("windows", "x86_64", "msvc", _)  => "build_out_windows_x86_64",
             ("windows", "x86", "msvc", _)     => "build_out_windows_x86",
@@ -30,8 +34,7 @@ mod utils {
             ("windows", "x86_64", "gnu" | "gnullvm", _)  => "build_out_windows_gnu_x86_64",
             ("windows", "x86", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_x86",
             ("windows", "arm", "gnu" | "gnullvm", _)     => "build_out_windows_gnu_arm",
-            
-            ("windows", _, _, _) => panic!("Unsupported Windows combination. Arch: {arch}, Env: {target_env}"),
+            ("windows", _, _, _)                         => "build_out_windows_x86_64",
 
             ("android", "aarch64", _, _) => "build_out_android_arm64-v8a",
             ("android", "arm", _, _)     => "build_out_android_armeabi-v7a",
@@ -50,13 +53,23 @@ mod utils {
             ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "x86", _, _)     => "build_out_linux_x86",
             ("linux" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "illumos" | "solaris" | "fuchsia" | "redox", "arm", _, _)     => "build_out_linux_armv7",
 
-            (_, "riscv32" | "riscv64" | "loongarch64" | "powerpc" | "s390x" | "mips" | "mips64", _, _) => panic!("Architecture {arch} requires a dedicated FFmpeg configuration."),
             ("none" | "unknown", _, _, _) => panic!("Bare-metal or unknown OS targets are not supported."),
 
             ("emscripten" | "wasi", "wasm32", _, _) => "build_out_emscripten_wasm32",
 
-            _ => panic!("Unsupported or missing config for target OS: {os}, Arch: {arch}, Env: {target_env}, ABI: {target_abi}"),
-        }
+            (u_os, u_arch, u_env, u_abi) => {
+                println!("cargo:warning=[ffmpeg_audio_sys] 当前构建目标 {u_os}-{u_arch}-{u_env}-{u_abi} 不受支持");
+                println!("cargo:warning=此 Crate 未包含指定目标的编译配置，将回退到 linux_x86_64 配置");
+                println!("cargo:warning=这可能导致编译失败或意外行为");
+                println!("cargo:warning=");
+                println!("cargo:warning=建议：");
+                println!("cargo:warning=  1. 设置 FFMPEG_CUSTOM_CONFIG 环境变量，提供一个精准匹配该架构的外部/内置配置目录");
+                println!("cargo:warning=  2. 放弃此 Crate 内置的 FFmpeg，使用你电脑上的 FFmpeg 开发库");
+                "build_out_linux_x86_64"
+            }
+        };
+
+        matched_dir.to_string()
     }
 
     pub fn extract_zip(zip_path: &Path, dest: &Path) -> io::Result<()> {
@@ -442,14 +455,37 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let build_mode = env::var("FFMPEG_MODE").unwrap_or_else(|_| "bundled".to_string());
+    println!("cargo:rerun-if-env-changed=FFMPEG_MODE");
+    println!("cargo:rerun-if-env-changed=FFMPEG_CUSTOM_CONFIG");
 
     let slim_zip = manifest_dir.join("vendor").join("ffmpeg_slim.zip");
     let vendor_ffmpeg = manifest_dir.join("vendor").join("ffmpeg_slim");
     let vendor_configs = manifest_dir.join("vendor").join("configs");
 
-    if slim_zip.exists() || (vendor_ffmpeg.exists() && vendor_configs.exists()) {
-        bundled::build(&manifest_dir, &out_dir).expect("构建内置 FFmpeg 时出错");
-    } else {
-        system::build(&out_dir, &target_os);
+    let has_bundled_files =
+        slim_zip.exists() || (vendor_ffmpeg.exists() && vendor_configs.exists());
+
+    match build_mode.to_lowercase().as_str() {
+        "system" => {
+            system::build(&out_dir, &target_os);
+        }
+        "bundled" => {
+            if has_bundled_files {
+                bundled::build(&manifest_dir, &out_dir).expect("构建内置 FFmpeg 时出错");
+            } else {
+                println!(
+                    "cargo:warning=[ffmpeg_audio_sys] 未在 vendor 目录下找到 ffmpeg_slim 产物"
+                );
+                println!("cargo:warning=已回退到尝试链接系统中的 FFmpeg");
+                println!(
+                    "cargo:warning=如果你希望使用内置的 FFmpeg，请确保 configs.zip 和 ffmpeg_slim.zip 已存在"
+                );
+                system::build(&out_dir, &target_os);
+            }
+        }
+        _ => {
+            panic!("未知的 FFMPEG_MODE: '{build_mode}'。支持的值为 'bundled' 或 'system'");
+        }
     }
 }

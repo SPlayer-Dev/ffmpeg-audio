@@ -33,6 +33,29 @@ The `scripts/` directory contains two Deno scripts:
 * **`generate_config.ts`** — Runs FFmpeg's `configure` script for a target platform and extracts the generated configuration files
 * **`extract_slim.ts`** — Parses `make_dryrun.log` to extract required C source files and packages them into `ffmpeg_slim.zip`
 
+## Environment Variables
+
+You can customize the build process of `ffmpeg-audio-sys` using the following environment variables:
+
+### `FFMPEG_MODE`
+
+Controls whether the crate builds from the bundled source or attempts to link against the system's FFmpeg libraries.
+
+* **`bundled` (Default):** The crate will compile the lightweight FFmpeg source included in `vendor/ffmpeg_slim.zip` and use the pre-generated configurations in `vendor/configs.zip`.
+* **`system`:** The crate will attempt to find and link against the installed FFmpeg libraries on your system.
+
+### `FFMPEG_CUSTOM_CONFIG`
+
+*(Only applies when `FFMPEG_MODE=bundled`)*
+
+Allows you to override the automatic target configuration matching. By default, `build.rs` automatically selects the appropriate configuration directory (e.g., `build_out_linux_x86_64`) based on the target OS, architecture, environment, and ABI.
+
+If you are building for an unsupported target or need to use a custom configuration, you can set `FFMPEG_CUSTOM_CONFIG` to:
+1.  **A relative name** matching an internal directory within `vendor/configs/` (e.g., `build_out_linux_armv7`).
+2.  **An absolute path** pointing to an external directory on your filesystem containing your custom configs. You can find examples through the [bundled configs](./vendor/configs.zip).
+
+**Unsupported Targets:** If `build.rs` encounters an unknown target and `FFMPEG_CUSTOM_CONFIG` is *not* set, it will fallback to the `linux_x86_64` configuration. This may result in compilation errors or UB at runtime. We suggest using `FFMPEG_CUSTOM_CONFIG` or switching to `FFMPEG_MODE=system`.
+
 ### Updating Configurations and the FFmpeg Bundle
 
 Run the `Update Bundled FFmpeg` workflow to automatically update `configs.zip` and `ffmpeg_slim` in the `crates/ffmpeg_audio_sys/vendor` directory.
