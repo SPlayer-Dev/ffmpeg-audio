@@ -158,14 +158,14 @@ fn test_stream_position_advances() {
         .unwrap();
 
     resampled.receive_frame_as::<f32>().unwrap();
-    let first_pts = resampled.stream_position();
+    let first_pts = resampled.source().stream_position();
     assert!(
         first_pts.is_some(),
         "解码至少一帧后，stream_position 应为 Some"
     );
 
     while resampled.receive_frame_as::<f32>().unwrap().is_some() {}
-    let last_pts = resampled.stream_position();
+    let last_pts = resampled.source().stream_position();
     assert!(
         last_pts >= first_pts,
         "播放时间应随解码推进而增大，first={first_pts:?} last={last_pts:?}"
@@ -186,11 +186,11 @@ fn test_stream_position_resets_after_seek() {
         .unwrap();
 
     resampled.receive_frame_as::<f32>().unwrap();
-    assert!(resampled.stream_position().is_some());
+    assert!(resampled.source().stream_position().is_some());
 
     resampled.seek(Duration::from_secs(0)).unwrap();
     assert!(
-        resampled.stream_position().is_none(),
+        resampled.source().stream_position().is_none(),
         "Seek 后 stream_position 应重置为 None"
     );
 }
@@ -233,7 +233,7 @@ fn test_seek_updates_pts_and_aligns_target() {
     resampled.seek(target).expect("Seek 调用失败");
 
     assert!(
-        resampled.stream_position().is_none(),
+        resampled.source().stream_position().is_none(),
         "Seek 调用后，在拉取新帧之前，PTS 必须处于重置状态"
     );
 
@@ -245,6 +245,7 @@ fn test_seek_updates_pts_and_aligns_target() {
     assert!(!frame_after_seek.is_empty(), "Seek 后读取到了空数据包");
 
     let post_seek_pts = resampled
+        .source()
         .stream_position()
         .expect("拉取缓冲帧后 PTS 为 None");
 

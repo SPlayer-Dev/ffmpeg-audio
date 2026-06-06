@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut resampled = reader.into_resampled(options)?;
 
-    let info = resampled.source_info();
+    let info = resampled.source().source_info();
     println!(
         "📄 源文件信息: {} ({} Hz, {} 声道)",
         info.codec_name.as_deref().unwrap_or("unknown"),

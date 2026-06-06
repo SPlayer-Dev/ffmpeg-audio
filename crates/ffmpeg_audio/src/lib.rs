@@ -16,7 +16,6 @@ use std::{
         Read,
         Seek,
     },
-    ops::Deref,
     time::Duration,
 };
 
@@ -263,15 +262,16 @@ pub struct ResampledReader {
     resampler: Resampler,
 }
 
-impl Deref for ResampledReader {
-    type Target = AudioReader;
-
-    fn deref(&self) -> &Self::Target {
+impl ResampledReader {
+    /// Returns a shared, immutable reference to the underlying `AudioReader`.
+    ///
+    /// This method provides access to the stream's static metadata (e.g.,
+    /// duration, cover art, source audio properties)
+    #[must_use]
+    pub const fn source(&self) -> &AudioReader {
         &self.reader
     }
-}
 
-impl ResampledReader {
     /// Pulls the next frame of audio data, automatically decoded and
     /// resampled to the target configuration.
     ///
