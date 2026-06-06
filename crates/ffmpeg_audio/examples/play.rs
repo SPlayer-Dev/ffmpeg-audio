@@ -17,6 +17,7 @@ fn main() -> anyhow::Result<()> {
     use ffmpeg_audio::{
         AudioReader,
         ResampleOptions,
+        ScanMode,
         log::init_ffmpeg_logging,
     };
     use ringbuf::{
@@ -81,10 +82,10 @@ fn main() -> anyhow::Result<()> {
 
     let duration_info = if let Some(dur) = quick_duration {
         Some(dur)
-    } else if let Some(dur) = resampled.scan_exact_duration(true)? {
+    } else if let Some(dur) = resampled.scan_exact_duration(ScanMode::Packet)? {
         Some(dur)
     } else {
-        resampled.scan_exact_duration(false)?
+        resampled.scan_exact_duration(ScanMode::Frame)?
     };
 
     if let Some(d) = duration_info {

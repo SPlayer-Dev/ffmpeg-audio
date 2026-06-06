@@ -4,9 +4,9 @@ pub mod log;
 
 mod decoder;
 mod demuxer;
+mod engine;
 mod format;
 mod frame;
-mod reader;
 mod resampler;
 mod swr;
 mod time;
@@ -22,6 +22,7 @@ use std::{
     time::Duration,
 };
 
+pub use engine::ScanMode;
 pub use error::{
     AudioError,
     Result,
@@ -39,13 +40,8 @@ pub use time::TimeBase;
 use crate::{
     decoder::Decoder,
     demuxer::Demuxer,
+    engine::DecodeEngine,
     log::init_ffmpeg_logging,
-    reader::{
-        AudioPipeline,
-        DurationScanner,
-        PlaybackState,
-        SeekEngine,
-    },
 };
 
 #[derive(Debug, Clone)]
@@ -87,9 +83,7 @@ pub struct SourceAudioInfo {
 }
 
 pub struct AudioReader {
-    decoder: Decoder,
-    demuxer: Demuxer,
-    state: PlaybackState,
+    engine: DecodeEngine,
     source_info: SourceAudioInfo,
 }
 
@@ -107,7 +101,6 @@ impl AudioReader {
         let demuxer = Demuxer::new(io_ctx)?;
         let codec_params = demuxer.stream_codec_params();
         let decoder = Decoder::new(codec_params)?;
-        let time_base = demuxer.time_base()?;
 
         let source_info = unsafe {
             let codec_id = (*codec_params).codec_id;
@@ -155,17 +148,10 @@ impl AudioReader {
             }
         };
 
-        let state = PlaybackState {
-            time_base,
-            current_pts: None,
-            is_exhausted: false,
-            has_buffered_seek_frame: false,
-        };
+        let engine = engine::DecodeEngine::new(demuxer, decoder)?;
 
         Ok(Self {
-            decoder,
-            demuxer,
-            state,
+            engine,
             source_info,
         })
     }
@@ -182,29 +168,17 @@ impl AudioReader {
     /// - `Ok(None)` if the end of the audio stream (EOF) has been reached.
     /// - `Err(AudioError)` if an underlying I/O or FFmpeg decoding error occurs.
     pub fn receive_frame(&mut self) -> Result<Option<AudioFrame<'_>>> {
-        AudioPipeline::receive_frame(&mut self.demuxer, &mut self.decoder, &mut self.state)
+        self.engine.receive_frame()
     }
 
     /// Seeks the underlying audio stream to the specified target duration.
     pub fn seek(&mut self, target: Duration) -> Result<()> {
-        SeekEngine::seek_to(
-            &mut self.demuxer,
-            &mut self.decoder,
-            &mut self.state,
-            &self.source_info,
-            target,
-        )
+        self.engine.seek(target)
     }
 
     /// Scans the entire audio stream to calculate its exact duration.
-    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
-        DurationScanner::scan_exact(
-            &mut self.demuxer,
-            &mut self.decoder,
-            &mut self.state,
-            &self.source_info,
-            fast_mode,
-        )
+    pub fn scan_exact_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
+        self.engine.scan_duration(mode)
     }
 
     /// Builds a [`Resampler`] pipeline tailored to this audio stream.
@@ -230,10 +204,11 @@ impl AudioReader {
     /// Returns an [`AudioError`] if the provided `options` are invalid, or if the
     /// internal FFmpeg `SwrContext` allocation and initialization fail.
     pub fn build_resampler(&self, options: ResampleOptions) -> Result<Resampler> {
+        let decoder = self.engine.decoder();
         Resampler::new(
-            &self.decoder.channel_layout(),
-            self.decoder.sample_fmt(),
-            self.decoder.sample_rate(),
+            &decoder.channel_layout(),
+            decoder.sample_fmt(),
+            decoder.sample_rate(),
             options,
         )
     }
@@ -250,9 +225,14 @@ impl AudioReader {
         })
     }
 
+    /// Returns the presentation timestamp of the most recently decoded audio frame.
+    ///
+    /// # Returns
+    /// * `Some(Duration)` representing the current decode position.
+    /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
     #[must_use]
-    pub const fn current_playback_time(&self) -> Option<Duration> {
-        self.state.current_pts
+    pub const fn stream_position(&self) -> Option<Duration> {
+        self.engine.stream_position()
     }
 
     #[must_use]
@@ -262,17 +242,17 @@ impl AudioReader {
 
     #[must_use]
     pub fn metadata(&self) -> HashMap<String, String> {
-        self.demuxer.metadata()
+        self.engine.demuxer().metadata()
     }
 
     #[must_use]
     pub fn duration(&self) -> Option<Duration> {
-        self.demuxer.duration()
+        self.engine.demuxer().duration()
     }
 
     #[must_use]
     pub fn cover(&self) -> Option<AudioCover> {
-        self.demuxer.cover()
+        self.engine.demuxer().cover()
     }
 }
 
@@ -345,8 +325,8 @@ impl ResampledReader {
     ///   - `false` (Frame-level scan): Fully decodes the audio into raw frames (equivalent to
     ///     `ffmpeg -f null -`). This is the most accurate method, but consumes significantly
     ///     more CPU and time.
-    pub fn scan_exact_duration(&mut self, fast_mode: bool) -> Result<Option<Duration>> {
-        let duration = self.reader.scan_exact_duration(fast_mode)?;
+    pub fn scan_exact_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
+        let duration = self.reader.scan_exact_duration(mode)?;
         self.resampler.flush()?;
 
         Ok(duration)

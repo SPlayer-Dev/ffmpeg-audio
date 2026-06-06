@@ -134,18 +134,18 @@ fn test_audio_seek_functionality() {
 }
 
 #[test]
-fn test_current_playback_time_initially_none() {
+fn test_stream_position_initially_none() {
     let wav_data = generate_sine_wav(1.0);
     let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
 
     assert!(
-        reader.current_playback_time().is_none(),
-        "解码开始前，current_playback_time 应为 None"
+        reader.stream_position().is_none(),
+        "解码开始前，stream_position 应为 None"
     );
 }
 
 #[test]
-fn test_current_playback_time_advances() {
+fn test_stream_position_advances() {
     let wav_data = generate_sine_wav(1.0);
     let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
     let mut resampled = reader
@@ -158,14 +158,14 @@ fn test_current_playback_time_advances() {
         .unwrap();
 
     resampled.receive_frame_as::<f32>().unwrap();
-    let first_pts = resampled.current_playback_time();
+    let first_pts = resampled.stream_position();
     assert!(
         first_pts.is_some(),
-        "解码至少一帧后，current_playback_time 应为 Some"
+        "解码至少一帧后，stream_position 应为 Some"
     );
 
     while resampled.receive_frame_as::<f32>().unwrap().is_some() {}
-    let last_pts = resampled.current_playback_time();
+    let last_pts = resampled.stream_position();
     assert!(
         last_pts >= first_pts,
         "播放时间应随解码推进而增大，first={first_pts:?} last={last_pts:?}"
@@ -173,7 +173,7 @@ fn test_current_playback_time_advances() {
 }
 
 #[test]
-fn test_current_playback_time_resets_after_seek() {
+fn test_stream_position_resets_after_seek() {
     let wav_data = generate_sine_wav(2.0);
     let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
     let mut resampled = reader
@@ -186,12 +186,12 @@ fn test_current_playback_time_resets_after_seek() {
         .unwrap();
 
     resampled.receive_frame_as::<f32>().unwrap();
-    assert!(resampled.current_playback_time().is_some());
+    assert!(resampled.stream_position().is_some());
 
     resampled.seek(Duration::from_secs(0)).unwrap();
     assert!(
-        resampled.current_playback_time().is_none(),
-        "Seek 后 current_playback_time 应重置为 None"
+        resampled.stream_position().is_none(),
+        "Seek 后 stream_position 应重置为 None"
     );
 }
 
@@ -233,7 +233,7 @@ fn test_seek_updates_pts_and_aligns_target() {
     resampled.seek(target).expect("Seek 调用失败");
 
     assert!(
-        resampled.current_playback_time().is_none(),
+        resampled.stream_position().is_none(),
         "Seek 调用后，在拉取新帧之前，PTS 必须处于重置状态"
     );
 
@@ -245,7 +245,7 @@ fn test_seek_updates_pts_and_aligns_target() {
     assert!(!frame_after_seek.is_empty(), "Seek 后读取到了空数据包");
 
     let post_seek_pts = resampled
-        .current_playback_time()
+        .stream_position()
         .expect("拉取缓冲帧后 PTS 为 None");
 
     let diff_ms = if post_seek_pts > target {
