@@ -77,10 +77,21 @@ impl ResampleOptions {
         self
     }
 
-    /// Sets the target audio sample format.
+    /// Sets the target audio sample format as Packed (Interleaved).
+    ///
+    /// For example, `[L, R, L, R]`
     #[must_use]
     pub const fn format<T: AudioSample>(mut self) -> Self {
-        self.target_sample_fmt = T::FORMAT;
+        self.target_sample_fmt = T::PACKED_FORMAT;
+        self
+    }
+
+    /// Sets the target audio sample format as Planar.
+    ///
+    /// For example, `[L, L, L]` and `[R, R, R]` in separate continuous blocks.
+    #[must_use]
+    pub const fn format_planar<T: AudioSample>(mut self) -> Self {
+        self.target_sample_fmt = T::PLANAR_FORMAT;
         self
     }
 }
@@ -95,7 +106,8 @@ pub struct Resampler {
     swr: SwrContext,
     options: ResampleOptions,
     buffer: RawAudioBuffer,
-    output_samples: usize,
+    actual_samples_per_channel: usize,
+    stride_samples_per_channel: usize,
 }
 
 impl Resampler {
@@ -108,10 +120,6 @@ impl Resampler {
         options.validate()?;
 
         unsafe {
-            if sys::av_sample_fmt_is_planar(options.target_sample_fmt) == 1 {
-                return Err(AudioError::from_ffmpeg(sys::AVERROR_INVALIDDATA));
-            }
-
             let mut out_layout = mem::zeroed::<sys::AVChannelLayout>();
             sys::av_channel_layout_default(&raw mut out_layout, options.target_channels);
 
@@ -130,9 +138,16 @@ impl Resampler {
                 swr,
                 options,
                 buffer: RawAudioBuffer::default(),
-                output_samples: 0,
+                actual_samples_per_channel: 0,
+                stride_samples_per_channel: 0,
             })
         }
+    }
+
+    /// Returns the target sample format configured for this resampler.
+    #[must_use]
+    pub const fn target_sample_fmt(&self) -> sys::AVSampleFormat {
+        self.options.target_sample_fmt
     }
 
     pub fn flush(&mut self) -> Result<()> {
@@ -150,7 +165,10 @@ impl Resampler {
     /// - `Ok(false)` if more input frames are needed to produce an output.
     /// - `Err` if a format mismatch or FFmpeg internal error occurs.
     pub fn process<T: AudioSample>(&mut self, frame: Option<&AudioFrame<'_>>) -> Result<bool> {
-        if T::FORMAT != self.options.target_sample_fmt {
+        let is_packed = self.options.target_sample_fmt == T::PACKED_FORMAT;
+        let is_planar = self.options.target_sample_fmt == T::PLANAR_FORMAT;
+
+        if !is_packed && !is_planar {
             return Err(AudioError::FormatMismatch);
         }
 
@@ -174,7 +192,7 @@ impl Resampler {
 
             let expected_out_samples = self.swr.get_out_samples(in_samples)?;
             if expected_out_samples <= 0 {
-                self.output_samples = 0;
+                self.actual_samples_per_channel = 0;
                 return Ok(false);
             }
 
@@ -184,6 +202,7 @@ impl Resampler {
                 (expected_out_samples as usize) * out_channels * std::mem::size_of::<T>();
 
             self.buffer.reserve_bytes(bytes_needed);
+            self.stride_samples_per_channel = expected_out_samples as usize;
 
             let out_buf_slice = self.buffer.as_uninit_bytes_mut();
 
@@ -194,13 +213,16 @@ impl Resampler {
                 bytes_needed
             );
 
-            let actual_out_samples = self
-                .swr
-                .convert_packed(in_data, in_samples, out_buf_slice)?;
+            let actual_samples = if is_planar {
+                self.swr
+                    .convert_planar(in_data, in_samples, out_buf_slice, expected_out_samples)?
+            } else {
+                self.swr
+                    .convert_packed(in_data, in_samples, out_buf_slice)?
+            };
 
-            self.output_samples = actual_out_samples * out_channels;
-
-            Ok(self.output_samples > 0)
+            self.actual_samples_per_channel = actual_samples;
+            Ok(self.actual_samples_per_channel > 0)
         }
     }
 
@@ -210,10 +232,43 @@ impl Resampler {
     /// returns `Ok(true)`. If there is no valid data, it returns an empty slice.
     #[must_use]
     pub const fn output_as<T: AudioSample>(&self) -> &[T] {
-        if self.output_samples == 0 {
+        if self.actual_samples_per_channel == 0 {
             return &[];
         }
-        unsafe { self.buffer.as_typed_slice::<T>(self.output_samples) }
+        unsafe {
+            self.buffer.as_typed_slice::<T>(
+                self.actual_samples_per_channel * self.options.target_channels as usize,
+            )
+        }
+    }
+
+    /// Exposes the internally processed Planar audio data as a collection of slices.
+    ///
+    /// # Returns
+    /// A `Vec` where each element is a slice representing one audio channel.
+    #[must_use]
+    pub fn output_planar_as<T: AudioSample>(&self) -> Vec<&[T]> {
+        if self.actual_samples_per_channel == 0 {
+            return vec![];
+        }
+
+        let channels_count = self.options.target_channels as usize;
+        let mut channels = Vec::with_capacity(channels_count);
+
+        let base_ptr = self.buffer.as_ptr::<T>();
+
+        for ch in 0..channels_count {
+            unsafe {
+                let ch_start_ptr = base_ptr.add(ch * self.stride_samples_per_channel);
+
+                let ch_slice =
+                    std::slice::from_raw_parts(ch_start_ptr, self.actual_samples_per_channel);
+
+                channels.push(ch_slice);
+            }
+        }
+
+        channels
     }
 }
 
@@ -228,6 +283,15 @@ pub struct RawAudioBuffer {
 }
 
 impl RawAudioBuffer {
+    /// Returns a raw pointer to the underlying memory, cast to `T`.
+    ///
+    /// This is useful for performing pointer arithmetic to skip over uninitialized
+    /// memory gaps (e.g., in planar audio layouts) without triggering UB by creating
+    /// a typed slice over uninitialized bytes.
+    pub const fn as_ptr<T: AudioSample>(&self) -> *const T {
+        self.inner.as_ptr().cast::<T>()
+    }
+
     /// Reserves minimum physical capacity to hold the requested number of bytes.
     ///
     /// This method only increases the underlying `capacity` of the allocator.

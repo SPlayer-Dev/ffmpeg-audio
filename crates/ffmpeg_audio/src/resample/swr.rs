@@ -21,6 +21,7 @@ pub struct SwrContext {
     ctx: *mut sys::SwrContext,
     out_channels: usize,
     out_bytes_per_sample: usize,
+    planar_ptrs_scratch: Vec<*mut u8>,
 }
 
 unsafe impl Send for SwrContext {}
@@ -90,6 +91,7 @@ impl SwrContext {
                 ctx,
                 out_channels,
                 out_bytes_per_sample,
+                planar_ptrs_scratch: Vec::with_capacity(out_channels),
             })
         }
     }
@@ -166,6 +168,60 @@ impl SwrContext {
             sys::swr_convert(
                 self.ctx,
                 out_ptrs.as_mut_ptr(),
+                expected_samples,
+                in_data,
+                in_samples,
+            )
+        }
+        .into_ff_result()?;
+
+        Ok(actual_samples as usize)
+    }
+
+    /// Executes the audio conversion and writes the resampled data into the provided
+    /// uninitialized buffer, specifically designed for planar output formats.
+    ///
+    /// # Safety
+    /// * `in_data` must be a valid double pointer to the input audio data.
+    /// * `out_buf` must be large enough to hold `expected_samples * channels * bytes_per_sample`.
+    ///
+    /// # Memory Layout
+    /// This method writes planar data sequentially into a single continuous buffer. It
+    /// dynamically constructs the required array of pointers internally to instruct FFmpeg
+    /// where each channel's block begins.
+    pub unsafe fn convert_planar(
+        &mut self,
+        in_data: *const *const u8,
+        in_samples: i32,
+        out_buf: &mut [MaybeUninit<u8>],
+        expected_samples: i32,
+    ) -> Result<usize> {
+        if expected_samples <= 0 {
+            return Ok(0);
+        }
+
+        let required_bytes =
+            (expected_samples as usize) * self.out_channels * self.out_bytes_per_sample;
+
+        if out_buf.len() < required_bytes {
+            return Err(AudioError::InvalidParameter(
+                "Output buffer is too small to hold the resampled planar data".to_string(),
+            ));
+        }
+
+        let base_ptr = out_buf.as_mut_ptr().cast::<u8>();
+        let stride_bytes = (expected_samples as usize) * self.out_bytes_per_sample;
+
+        self.planar_ptrs_scratch.clear();
+        for ch in 0..self.out_channels {
+            self.planar_ptrs_scratch
+                .push(unsafe { base_ptr.add(ch * stride_bytes) });
+        }
+
+        let actual_samples = unsafe {
+            sys::swr_convert(
+                self.ctx,
+                self.planar_ptrs_scratch.as_mut_ptr(),
                 expected_samples,
                 in_data,
                 in_samples,

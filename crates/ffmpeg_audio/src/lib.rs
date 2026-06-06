@@ -204,6 +204,10 @@ impl ResampledReader {
     /// `ResampleOptions` (e.g., `f32`, `i16`). Otherwise, an
     /// [`AudioError::FormatMismatch`] will be returned.
     pub fn receive_frame_as<T: AudioSample>(&mut self) -> Result<Option<&[T]>> {
+        if self.resampler.target_sample_fmt() != T::PACKED_FORMAT {
+            return Err(AudioError::FormatMismatch);
+        }
+
         loop {
             let frame = self.reader.receive_frame()?;
 
@@ -211,6 +215,35 @@ impl ResampledReader {
 
             if has_output {
                 return Ok(Some(self.resampler.output_as::<T>()));
+            }
+
+            if frame.is_none() {
+                return Ok(None);
+            }
+        }
+    }
+
+    /// Pulls the next frame of audio data, automatically decoded and
+    /// resampled into a planar memory layout.
+    ///
+    /// # Returns
+    /// * `Ok(Some(Vec<&[T]>))` where each slice in the vector represents a discrete channel.
+    ///
+    /// # Type Safety
+    /// The target `ResampleOptions` must have been configured using `format_planar::<T>()`.
+    /// Otherwise, an [`AudioError::FormatMismatch`] is returned.
+    pub fn receive_planar_as<T: AudioSample>(&mut self) -> Result<Option<Vec<&[T]>>> {
+        if self.resampler.target_sample_fmt() != T::PLANAR_FORMAT {
+            return Err(AudioError::FormatMismatch);
+        }
+
+        loop {
+            let frame = self.reader.receive_frame()?;
+
+            let has_output = self.resampler.process::<T>(frame.as_ref())?;
+
+            if has_output {
+                return Ok(Some(self.resampler.output_planar_as::<T>()));
             }
 
             if frame.is_none() {

@@ -4,22 +4,31 @@ use crate::sys;
 ///
 /// This trait is used to ensure type safety when extracting resampled audio data.
 pub trait AudioSample: Copy + Send + Sync + 'static {
-    const FORMAT: sys::AVSampleFormat;
+    /// The FFmpeg sample format enum corresponding to the packed (interleaved) layout.
+    const PACKED_FORMAT: sys::AVSampleFormat;
+
+    /// The FFmpeg sample format enum corresponding to the planar layout.
+    const PLANAR_FORMAT: sys::AVSampleFormat;
 }
 
 impl AudioSample for f32 {
-    const FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_FLT;
+    const PACKED_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_FLT;
+    const PLANAR_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_FLTP;
 }
 
 impl AudioSample for i16 {
-    const FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S16;
+    const PACKED_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S16;
+    const PLANAR_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S16P;
 }
 
 impl AudioSample for i32 {
     #[expect(clippy::use_self)]
-    const FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S32;
+    const PACKED_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S32;
+    #[expect(clippy::use_self)]
+    const PLANAR_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_S32P;
 }
 
 impl AudioSample for u8 {
-    const FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_U8;
+    const PACKED_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_U8;
+    const PLANAR_FORMAT: sys::AVSampleFormat = sys::AVSampleFormat_AV_SAMPLE_FMT_U8P;
 }

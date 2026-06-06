@@ -44,10 +44,11 @@ fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("用法: {} <音频文件路径>", args[0]);
+        eprintln!("用法: {} <音频文件路径> [--planar]", args[0]);
         std::process::exit(1);
     }
     let file_path = &args[1];
+    let use_planar = args.iter().any(|arg| arg == "--planar");
 
     let host = cpal::default_host();
     let device = host
@@ -65,10 +66,15 @@ fn main() -> anyhow::Result<()> {
 
     let quick_duration = reader.duration();
 
-    let options = ResampleOptions::new()
+    let mut options = ResampleOptions::new()
         .sample_rate(i32::try_from(sample_rate)?)
-        .channels(i32::from(channels))
-        .format::<f32>();
+        .channels(i32::from(channels));
+
+    options = if use_planar {
+        options.format_planar::<f32>()
+    } else {
+        options.format::<f32>()
+    };
 
     let mut resampled = reader.into_resampled(options)?;
 
@@ -119,15 +125,56 @@ fn main() -> anyhow::Result<()> {
     stream.play()?;
     println!("▶️ 开始播放...");
 
-    while let Some(frame) = resampled.receive_frame_as::<f32>()? {
-        let mut written = 0;
+    if use_planar {
+        let mut interleaved_buf = Vec::new();
 
-        while written < frame.len() {
-            let pushed = producer.push_slice(&frame[written..]);
-            written += pushed;
+        while let Some(channels_data) = resampled.receive_planar_as::<f32>()? {
+            let num_channels = channels_data.len();
 
-            if pushed == 0 {
-                thread::sleep(Duration::from_millis(2));
+            if num_channels == 0 {
+                continue;
+            }
+
+            let samples_per_channel = channels_data[0].len();
+
+            let is_uniform = channels_data
+                .iter()
+                .all(|ch| ch.len() == samples_per_channel);
+            if !is_uniform {
+                continue;
+            }
+
+            interleaved_buf.clear();
+            interleaved_buf.reserve(num_channels * samples_per_channel);
+
+            #[expect(clippy::needless_range_loop)]
+            for i in 0..samples_per_channel {
+                for ch in 0..num_channels {
+                    interleaved_buf.push(channels_data[ch][i]);
+                }
+            }
+
+            let mut written = 0;
+            while written < interleaved_buf.len() {
+                let pushed = producer.push_slice(&interleaved_buf[written..]);
+                written += pushed;
+
+                if pushed == 0 {
+                    thread::sleep(Duration::from_millis(2));
+                }
+            }
+        }
+    } else {
+        while let Some(frame) = resampled.receive_frame_as::<f32>()? {
+            let mut written = 0;
+
+            while written < frame.len() {
+                let pushed = producer.push_slice(&frame[written..]);
+                written += pushed;
+
+                if pushed == 0 {
+                    thread::sleep(Duration::from_millis(2));
+                }
             }
         }
     }

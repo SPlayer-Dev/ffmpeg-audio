@@ -290,3 +290,99 @@ fn test_seek_near_eof_does_not_panic_or_loop() {
         "逼近末尾的跳转至少应该能读取到最后的几帧音频"
     );
 }
+
+#[test]
+fn test_planar_audio_pipeline_and_signal_validation() {
+    let wav_data = generate_sine_wav(1.0);
+    let source = Cursor::new(wav_data);
+
+    let target_sample_rate = 48000;
+    let target_channels = 2;
+
+    let reader = AudioReader::new(source).expect("初始化 AudioReader 失败");
+
+    let options = ResampleOptions::new()
+        .sample_rate(target_sample_rate)
+        .channels(target_channels)
+        .format_planar::<f32>();
+
+    let mut resampled = reader
+        .into_resampled(options)
+        .expect("初始化 ResampledReader 失败");
+
+    let mut total_samples_per_channel = 0;
+    let mut energy_sum_ch0: f64 = 0.0;
+    let mut energy_sum_ch1: f64 = 0.0;
+
+    while let Some(channels) = resampled
+        .receive_planar_as::<f32>()
+        .expect("解码平面数据时发生错误")
+    {
+        assert_eq!(
+            channels.len(),
+            target_channels as usize,
+            "返回的声道列表长度与目标声道数不匹配"
+        );
+
+        let samples_this_frame = channels[0].len();
+        assert_eq!(
+            channels[1].len(),
+            samples_this_frame,
+            "不同声道的切片长度出现不一致（Planar内存切片错误）"
+        );
+
+        for &sample in channels[0] {
+            energy_sum_ch0 = f64::from(sample).mul_add(f64::from(sample), energy_sum_ch0);
+        }
+        for &sample in channels[1] {
+            energy_sum_ch1 = f64::from(sample).mul_add(f64::from(sample), energy_sum_ch1);
+        }
+
+        total_samples_per_channel += samples_this_frame;
+    }
+
+    assert!(
+        (47900..=48100).contains(&total_samples_per_channel),
+        "单声道样本数量异常! 预期约 48000，实际为 {total_samples_per_channel}"
+    );
+
+    let rms_ch0 = f64::sqrt(energy_sum_ch0 / total_samples_per_channel as f64);
+    let rms_ch1 = f64::sqrt(energy_sum_ch1 / total_samples_per_channel as f64);
+
+    assert!(rms_ch0 > 0.1, "声道 0 输出为空或能量过低");
+    assert!(rms_ch1 > 0.1, "声道 1 输出为空或能量过低");
+}
+
+#[test]
+fn test_planar_format_mismatch_rejection_packed_to_planar() {
+    let wav_data = generate_sine_wav(0.1);
+    let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+
+    let mut resampled = reader
+        .into_resampled(ResampleOptions::new().format::<f32>())
+        .unwrap();
+
+    let result = resampled.receive_planar_as::<f32>();
+
+    assert!(
+        matches!(result, Err(ffmpeg_audio::AudioError::FormatMismatch)),
+        "期望返回 FormatMismatch 错误，但得到了: {result:?}"
+    );
+}
+
+#[test]
+fn test_planar_format_mismatch_rejection_planar_to_packed() {
+    let wav_data = generate_sine_wav(0.1);
+    let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+
+    let mut resampled = reader
+        .into_resampled(ResampleOptions::new().format_planar::<f32>())
+        .unwrap();
+
+    let result = resampled.receive_frame_as::<f32>();
+
+    assert!(
+        matches!(result, Err(ffmpeg_audio::AudioError::FormatMismatch)),
+        "期望返回 FormatMismatch 错误，但得到了: {result:?}"
+    );
+}
