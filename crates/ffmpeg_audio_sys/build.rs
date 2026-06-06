@@ -312,6 +312,10 @@ mod bundled {
         if os == "windows" && target_env == "msvc" {
             build.flag("/utf-8");
         }
+        if os == "emscripten" {
+            build.flag("-fPIC");
+            build.flag("-msimd128");
+        }
         build.warnings(false);
         build.compile("ffmpeg_audio");
 
