@@ -11,10 +11,8 @@ use std::{
 };
 
 use crate::{
-    error::{
-        AudioError,
-        Result,
-    },
+    AudioError,
+    Result,
     sys,
 };
 

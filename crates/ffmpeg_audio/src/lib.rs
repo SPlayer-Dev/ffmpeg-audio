@@ -1,16 +1,14 @@
+pub mod core;
+pub mod decode;
 pub mod error;
-pub mod io;
 pub mod log;
+pub mod resample;
 
-mod decoder;
-mod demuxer;
-mod engine;
-mod format;
-mod frame;
-mod resampler;
-mod swr;
-mod time;
-
+pub use core::{
+    format::AudioSample,
+    frame::AudioFrame,
+    time::TimeBase,
+};
 use std::{
     collections::HashMap,
     ffi::CStr,
@@ -22,25 +20,25 @@ use std::{
     time::Duration,
 };
 
-pub use engine::ScanMode;
+pub use decode::ScanMode;
 pub use error::{
     AudioError,
+    FfErrorExt,
     Result,
 };
 pub use ffmpeg_audio_sys as sys;
-pub use format::AudioSample;
-pub use frame::AudioFrame;
-pub use resampler::{
+pub use resample::{
     ResampleOptions,
     Resampler,
 };
-pub use swr::SwrContext;
-pub use time::TimeBase;
 
 use crate::{
-    decoder::Decoder,
-    demuxer::Demuxer,
-    engine::DecodeEngine,
+    decode::{
+        DecodeEngine,
+        Decoder,
+        Demuxer,
+        io::IoContext,
+    },
     log::init_ffmpeg_logging,
 };
 
@@ -97,7 +95,7 @@ impl AudioReader {
     {
         init_ffmpeg_logging();
 
-        let io_ctx = io::IoContext::new(source)?;
+        let io_ctx = IoContext::new(source)?;
         let demuxer = Demuxer::new(io_ctx)?;
         let codec_params = demuxer.stream_codec_params();
         let decoder = Decoder::new(codec_params)?;
@@ -148,7 +146,7 @@ impl AudioReader {
             }
         };
 
-        let engine = engine::DecodeEngine::new(demuxer, decoder)?;
+        let engine = DecodeEngine::new(demuxer, decoder)?;
 
         Ok(Self {
             engine,

@@ -7,14 +7,12 @@ use std::{
 
 use crate::{
     AudioCover,
-    error::{
-        AudioError,
-        FfErrorExt as _,
-        Result,
-    },
-    io::IoContext,
+    AudioError,
+    FfErrorExt as _,
+    IoContext,
+    Result,
+    TimeBase,
     sys,
-    time::TimeBase,
 };
 
 pub struct Demuxer {

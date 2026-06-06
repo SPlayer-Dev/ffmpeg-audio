@@ -3,11 +3,11 @@ use std::time::Duration;
 use crate::{
     AudioError,
     AudioFrame,
-    decoder::Decoder,
-    demuxer::Demuxer,
-    error::Result,
+    Decoder,
+    Demuxer,
+    Result,
+    TimeBase,
     sys,
-    time::TimeBase,
 };
 
 /// Specifies the strategy used to scan an audio stream to determine its exact duration.

@@ -1,11 +1,9 @@
 use std::ptr;
 
 use crate::{
-    error::{
-        AudioError,
-        FfErrorExt as _,
-        Result,
-    },
+    AudioError,
+    FfErrorExt as _,
+    Result,
     sys,
 };
 

@@ -5,8 +5,8 @@ use std::{
 };
 
 use crate::{
+    TimeBase,
     sys,
-    time::TimeBase,
 };
 
 /// A safe, zero-copy wrapper around FFmpeg's raw `AVFrame`.

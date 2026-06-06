@@ -8,12 +8,12 @@ use std::{
 
 use crate::{
     AudioFrame,
+    core::format::AudioSample,
     error::{
         AudioError,
         Result,
     },
-    format::AudioSample,
-    swr::SwrContext,
+    resample::SwrContext,
     sys,
 };
 
