@@ -81,7 +81,6 @@ impl Demuxer {
 
     pub fn stream_codec_params(&self) -> *mut sys::AVCodecParameters {
         unsafe {
-            // Safety: 我们在 new 中已经验证了索引的合法性
             let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
             (*stream_ptr).codecpar
         }
@@ -128,16 +127,32 @@ impl Demuxer {
 
             let target_us = target.as_micros() as i64;
 
-            let pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
+            let lower_us = (target_us.saturating_sub(1_000_000)).max(0);
+            let upper_us = target_us.saturating_add(1_000_000);
 
-            let ret = sys::avformat_seek_file(
+            let pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
+            let min_pts = sys::av_rescale_q(lower_us, sys::MICROSECONDS_Q, time_base);
+            let max_pts = sys::av_rescale_q(upper_us, sys::MICROSECONDS_Q, time_base);
+
+            let mut ret = sys::avformat_seek_file(
                 self.ctx,
                 self.audio_stream_idx as i32,
-                i64::MIN,
+                min_pts,
                 pts,
-                pts,
+                max_pts,
                 sys::AVSEEK_FLAG_BACKWARD.cast_signed(),
             );
+
+            if ret < 0 {
+                ret = sys::avformat_seek_file(
+                    self.ctx,
+                    self.audio_stream_idx as i32,
+                    i64::MIN,
+                    pts,
+                    i64::MAX,
+                    sys::AVSEEK_FLAG_BYTE.cast_signed(),
+                );
+            }
 
             if ret < 0 {
                 return Err(AudioError::from_ffmpeg(ret));
