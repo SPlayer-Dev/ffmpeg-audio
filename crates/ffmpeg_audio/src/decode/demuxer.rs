@@ -251,17 +251,9 @@ unsafe fn extract_dict(dict: *mut sys::AVDictionary, map: &mut HashMap<String, S
         return;
     }
 
-    let mut entry = ptr::null_mut();
+    let mut entry = ptr::null();
     loop {
-        entry = unsafe {
-            sys::av_dict_get(
-                dict,
-                c"".as_ptr(),
-                entry,
-                sys::AV_DICT_IGNORE_SUFFIX.cast_signed(),
-            )
-        };
-
+        entry = unsafe { sys::av_dict_iterate(dict, entry) };
         if entry.is_null() {
             break;
         }
