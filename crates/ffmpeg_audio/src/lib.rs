@@ -62,12 +62,7 @@ impl AudioReader {
     {
         init_ffmpeg_logging();
 
-        let io_ctx = IoContext::new(source)?;
-        let demuxer = Demuxer::new(io_ctx)?;
-        let codec_params = demuxer.stream_codec_params();
-        let decoder = Decoder::new(codec_params)?;
-
-        let engine = DecodeEngine::new(demuxer, decoder)?;
+        let engine = DecodeEngine::new(source)?;
 
         let source_info = SourceAudioInfo::probe(&engine);
 

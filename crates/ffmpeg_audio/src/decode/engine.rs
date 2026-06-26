@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    io::{
+        Read,
+        Seek,
+    },
+    time::Duration,
+};
 
 use crate::{
     AudioError,
@@ -7,6 +13,7 @@ use crate::{
     Demuxer,
     Result,
     TimeBase,
+    decode::io::IoContext,
     sys,
 };
 
@@ -65,8 +72,19 @@ impl DecodeEngine {
     /// # Returns
     /// * `Ok(DecodeEngine)` if the engine is successfully initialized and the time base is valid.
     /// * `Err(AudioError)` if the demuxer fails to provide a valid time base for synchronization.
-    pub fn new(demuxer: Demuxer, decoder: Decoder) -> Result<Self> {
+    pub fn new<T>(source: T) -> Result<Self>
+    where
+        T: Read + Seek + Send + 'static,
+    {
+        let io_ctx = IoContext::new(source)?;
+
+        let demuxer = Demuxer::new(io_ctx)?;
+
+        let codec_params = demuxer.stream_codec_params();
+        let decoder = Decoder::new(codec_params)?;
+
         let time_base = demuxer.time_base()?;
+
         Ok(Self {
             demuxer,
             decoder,
