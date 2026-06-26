@@ -112,7 +112,7 @@ fn main() -> anyhow::Result<()> {
     let cpal_config = config.config();
 
     let stream = device.build_output_stream(
-        &cpal_config,
+        cpal_config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             for sample in data.iter_mut() {
                 *sample = consumer.try_pop().unwrap_or(0.0);

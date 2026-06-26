@@ -19,7 +19,7 @@ ringbuf = "0.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cpal = "0.17"
+cpal = "0.18"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
