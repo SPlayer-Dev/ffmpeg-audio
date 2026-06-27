@@ -134,6 +134,7 @@ export class AudioRenderer {
 	 */
 	public destroyNode(): void {
 		if (this.workletNode) {
+			this.workletNode.port.postMessage({ type: "DESTROY" });
 			this.workletNode.disconnect();
 			this.workletNode = null;
 		}

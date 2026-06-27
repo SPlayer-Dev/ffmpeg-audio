@@ -38,6 +38,13 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 				this.stProcessor.setPitch(payload.pitch);
 			} else if (type === "SET_RATE" && this.stProcessor) {
 				this.stProcessor.setRate(payload.rate);
+			} else if (type === "DESTROY") {
+				if (this.stProcessor) {
+					this.stProcessor.free();
+					this.stProcessor = null;
+				}
+				this.wasmMemory = null;
+				this.audioReader = null;
 			}
 		});
 
