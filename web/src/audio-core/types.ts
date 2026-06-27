@@ -13,7 +13,8 @@ export interface EngineConfig {
 	assets: {
 		workerUrl: string;
 		workletUrl: string;
-		wasmUrl: string;
+		ffmpegWasmUrl: string;
+		soundtouchWasmUrl: string;
 	};
 }
 

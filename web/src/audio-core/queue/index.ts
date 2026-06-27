@@ -91,6 +91,27 @@ export interface AudioReader {
 	 * @param outLen The number of frames requested by the audio context.
 	 */
 	read(outputs: Float32Array[][], outLen: number): void;
+	/**
+	 * Returns true if the playback state is currently set to playing.
+	 */
+	isPlaying(): boolean;
+	/**
+	 * Returns true if the player is currently seeking.
+	 */
+	isSeeking(): boolean;
+	/**
+	 * Probe: Returns the number of actual audio frames available to read in the buffer.
+	 */
+	getAvailableReadFrames(): number;
+	/**
+	 * Pulls a specific number of audio frames from the buffer into the output arrays.
+	 * Does NOT pad with silence. Returns only the actual number of frames read.
+	 *
+	 * @param outputs An array of Float32Arrays representing destination channels (often mapped to Wasm memory).
+	 * @param length The maximum number of frames requested.
+	 * @returns The actual number of frames successfully read.
+	 */
+	readPartial(outputs: Float32Array[], length: number): number;
 }
 //#endregion
 
@@ -269,6 +290,60 @@ class AudioQueueCore implements MainAudioController, AudioWriter, AudioReader {
 
 		Atomics.add(this.controlBlock, STATE_READ_INDEX, outLen);
 		Atomics.notify(this.controlBlock, STATE_READ_INDEX, 1);
+	}
+
+	isPlaying(): boolean {
+		return Atomics.load(this.controlBlock, STATE_PLAYING) === 1;
+	}
+
+	isSeeking(): boolean {
+		return Atomics.load(this.controlBlock, STATE_IS_SEEKING) === 1;
+	}
+
+	getAvailableReadFrames(): number {
+		const writeIndex = Atomics.load(this.controlBlock, STATE_WRITE_INDEX);
+		const readIndex = Atomics.load(this.controlBlock, STATE_READ_INDEX);
+		return writeIndex - readIndex;
+	}
+
+	readPartial(outputs: Float32Array[], length: number): number {
+		if (!this.isPlaying() || this.isSeeking()) {
+			return 0;
+		}
+
+		const writeIndex = Atomics.load(this.controlBlock, STATE_WRITE_INDEX);
+		const readIndex = Atomics.load(this.controlBlock, STATE_READ_INDEX);
+		const availableData = writeIndex - readIndex;
+		const readAmount = Math.min(length, availableData);
+
+		if (readAmount === 0) {
+			return 0;
+		}
+
+		const ringPos = readIndex % RING_BUFFER_CAPACITY;
+		const spaceToEnd = RING_BUFFER_CAPACITY - ringPos;
+		for (let c = 0; c < this.channels; c++) {
+			if (!outputs[c]) continue;
+			if (readAmount <= spaceToEnd) {
+				outputs[c].set(
+					this.channelBuffers[c].subarray(ringPos, ringPos + readAmount),
+				);
+			} else {
+				outputs[c].set(
+					this.channelBuffers[c].subarray(ringPos, RING_BUFFER_CAPACITY),
+					0,
+				);
+				const remaining = readAmount - spaceToEnd;
+				outputs[c].set(
+					this.channelBuffers[c].subarray(0, remaining),
+					spaceToEnd,
+				);
+			}
+		}
+
+		Atomics.add(this.controlBlock, STATE_READ_INDEX, readAmount);
+		Atomics.notify(this.controlBlock, STATE_READ_INDEX, 1);
+		return readAmount;
 	}
 	//#endregion
 

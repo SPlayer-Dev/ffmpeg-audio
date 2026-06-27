@@ -22,7 +22,7 @@ export class DecoderWorkerClient {
 		sampleRate: number,
 		channels: number,
 		sharedBuffer: SharedArrayBuffer,
-		wasmUrl: string,
+		ffmpegWasmUrl: string,
 	): void {
 		this.destroy();
 
@@ -34,7 +34,7 @@ export class DecoderWorkerClient {
 
 		this.worker.postMessage({
 			type: "INIT",
-			payload: { file, sampleRate, channels, sharedBuffer, wasmUrl },
+			payload: { file, sampleRate, channels, sharedBuffer, ffmpegWasmUrl },
 		});
 	}
 

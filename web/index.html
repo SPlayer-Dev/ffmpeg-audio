@@ -71,6 +71,34 @@
 		input[type="range"] {
 			flex: 1;
 		}
+		.dsp-controls {
+			margin-top: 1.5rem;
+			padding: 1rem;
+			background: #f5f5f5;
+			border-radius: 8px;
+			display: flex;
+			flex-direction: column;
+			gap: 1rem;
+		}
+		.slider-group {
+			display: flex;
+			align-items: center;
+			gap: 1rem;
+		}
+		.slider-group label {
+			width: 150px;
+			font-size: 0.9rem;
+			color: #333;
+			display: flex;
+			justify-content: space-between;
+		}
+		.slider-group input[type="range"] {
+			flex: 1;
+		}
+		.reset-btn-container {
+			display: flex;
+			justify-content: flex-end;
+		}
 		</style>
 	</head>
 	<body>
@@ -101,6 +129,48 @@
 				disabled
 			>
 			<span id="time-total">00:00</span>
+		</div>
+
+		<div class="dsp-controls">
+			<div class="slider-group">
+				<label>Tempo: <span id="val-tempo">1.00x</span></label>
+				<input
+					type="range"
+					id="slider-tempo"
+					min="0.5"
+					max="2.0"
+					step="0.01"
+					value="1.0"
+					disabled
+				>
+			</div>
+			<div class="slider-group">
+				<label>Pitch: <span id="val-pitch">1.00x</span></label>
+				<input
+					type="range"
+					id="slider-pitch"
+					min="0.5"
+					max="2.0"
+					step="0.01"
+					value="1.0"
+					disabled
+				>
+			</div>
+			<div class="slider-group">
+				<label>Rate: <span id="val-rate">1.00x</span></label>
+				<input
+					type="range"
+					id="slider-rate"
+					min="0.5"
+					max="2.0"
+					step="0.01"
+					value="1.0"
+					disabled
+				>
+			</div>
+			<div class="reset-btn-container">
+				<button id="btn-reset-dsp" disabled>Reset DSP</button>
+			</div>
 		</div>
 
 		<script type="module" src="/src/main.ts"></script>

@@ -13,6 +13,25 @@ export class AppUI {
 	private coverArt = document.getElementById("cover-art") as HTMLDivElement;
 	private metadataDiv = document.getElementById("metadata") as HTMLDivElement;
 
+	private sliderTempo = document.getElementById(
+		"slider-tempo",
+	) as HTMLInputElement;
+	private valTempo = document.getElementById("val-tempo") as HTMLSpanElement;
+
+	private sliderPitch = document.getElementById(
+		"slider-pitch",
+	) as HTMLInputElement;
+	private valPitch = document.getElementById("val-pitch") as HTMLSpanElement;
+
+	private sliderRate = document.getElementById(
+		"slider-rate",
+	) as HTMLInputElement;
+	private valRate = document.getElementById("val-rate") as HTMLSpanElement;
+
+	private btnResetDsp = document.getElementById(
+		"btn-reset-dsp",
+	) as HTMLButtonElement;
+
 	private isDragging = false;
 	private currentCoverUrl: string | null = null;
 
@@ -44,6 +63,28 @@ export class AppUI {
 			const targetSeconds = parseFloat((e.target as HTMLInputElement).value);
 			this.engine.currentTime = targetSeconds;
 		});
+
+		this.sliderTempo.addEventListener("input", (e) => {
+			const val = parseFloat((e.target as HTMLInputElement).value);
+			this.valTempo.textContent = `${val.toFixed(2)}x`;
+			this.engine.tempo = val;
+		});
+
+		this.sliderPitch.addEventListener("input", (e) => {
+			const val = parseFloat((e.target as HTMLInputElement).value);
+			this.valPitch.textContent = `${val.toFixed(2)}x`;
+			this.engine.pitch = val;
+		});
+
+		this.sliderRate.addEventListener("input", (e) => {
+			const val = parseFloat((e.target as HTMLInputElement).value);
+			this.valRate.textContent = `${val.toFixed(2)}x`;
+			this.engine.rate = val;
+		});
+
+		this.btnResetDsp.addEventListener("click", () => {
+			this.resetDspSliders();
+		});
 	}
 
 	private bindEngineEvents(): void {
@@ -55,6 +96,12 @@ export class AppUI {
 			this.playBtn.disabled = false;
 			this.pauseBtn.disabled = false;
 			this.seekBar.disabled = false;
+
+			this.sliderTempo.disabled = false;
+			this.sliderPitch.disabled = false;
+			this.sliderRate.disabled = false;
+			this.btnResetDsp.disabled = false;
+
 			this.renderTrackInfo();
 		});
 
@@ -79,6 +126,21 @@ export class AppUI {
 	//#endregion
 
 	//#region Actions & Rendering
+
+	private resetDspSliders(): void {
+		this.sliderTempo.value = "1.0";
+		this.valTempo.textContent = "1.00x";
+		this.engine.tempo = 1.0;
+
+		this.sliderPitch.value = "1.0";
+		this.valPitch.textContent = "1.00x";
+		this.engine.pitch = 1.0;
+
+		this.sliderRate.value = "1.0";
+		this.valRate.textContent = "1.00x";
+		this.engine.rate = 1.0;
+	}
+
 	private async handleOpenFile(): Promise<void> {
 		try {
 			const [fileHandle] = await window.showOpenFilePicker({
@@ -137,6 +199,7 @@ export class AppUI {
 
 			this.openBtn.disabled = true;
 			this.openBtn.textContent = "Loading...";
+			this.resetDspSliders();
 
 			await this.engine.loadFile(file);
 		} catch (err) {

@@ -1,5 +1,4 @@
-import { DecoderWorkerClient } from "./core";
-import { AudioRenderer } from "./core/";
+import { AudioRenderer, DecoderWorkerClient } from "./core";
 import {
 	allocateAudioQueueMemory,
 	createMainController,
@@ -30,6 +29,10 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	private _error: EngineError | null = null;
 	private baseTime = 0;
 
+	private _tempo = 1.0;
+	private _pitch = 1.0;
+	private _rate = 1.0;
+
 	private timeupdateTimer: ReturnType<typeof setInterval> | null = null;
 	private loadResolve: (() => void) | null = null;
 
@@ -40,6 +43,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.renderer = new AudioRenderer(
 			config.audioContext,
 			config.assets.workletUrl,
+			config.assets.soundtouchWasmUrl,
 		);
 
 		this.workerClient = new DecoderWorkerClient(config.assets.workerUrl, {
@@ -90,6 +94,32 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.workerClient.seek(seconds);
 	}
 
+	public get tempo(): number {
+		return this._tempo;
+	}
+
+	public set tempo(val: number) {
+		this._tempo = Math.max(0.1, val);
+		this.renderer.setTempo(this._tempo);
+	}
+
+	public get pitch(): number {
+		return this._pitch;
+	}
+
+	public set pitch(val: number) {
+		this._pitch = Math.max(0.1, val);
+		this.renderer.setPitch(this._pitch);
+	}
+	public get rate(): number {
+		return this._rate;
+	}
+
+	public set rate(val: number) {
+		this._rate = Math.max(0.1, val);
+		this.renderer.setRate(this._rate);
+	}
+
 	/**
 	 * Loads a file, prepares the multithreading environment, and extracts metadata.
 	 */
@@ -109,8 +139,8 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 			this.sharedBuffer = allocateAudioQueueMemory(channels);
 		}
 		this.audioController = createMainController(this.sharedBuffer, channels);
-		this.renderer.bindQueue(this.sharedBuffer, channels);
 
+		await this.renderer.bindQueue(this.sharedBuffer, channels);
 		const loadPromise = new Promise<void>((resolve) => {
 			this.loadResolve = resolve;
 		});
@@ -120,7 +150,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 			sampleRate,
 			channels,
 			this.sharedBuffer,
-			this.config.assets.wasmUrl,
+			this.config.assets.ffmpegWasmUrl,
 		);
 
 		await loadPromise;

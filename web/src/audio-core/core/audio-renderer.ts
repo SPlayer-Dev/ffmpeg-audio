@@ -1,11 +1,15 @@
 export class AudioRenderer {
+	private initCounter = 0;
+
 	private workletNode: AudioWorkletNode | null = null;
 	private _isWorkletLoaded = false;
 	private initPromise: Promise<void> | null = null;
+	private stWasmBytes: ArrayBuffer | null = null;
 
 	constructor(
 		private audioCtx: AudioContext,
 		private workletUrl: string,
+		private stWasmUrl: string,
 	) {}
 
 	/**
@@ -19,6 +23,11 @@ export class AudioRenderer {
 	 * Ensures the AudioWorklet module is added and the node is connected.
 	 */
 	public async initialize(channels: number): Promise<void> {
+		if (!this.stWasmBytes) {
+			const resp = await fetch(this.stWasmUrl);
+			this.stWasmBytes = await resp.arrayBuffer();
+		}
+
 		if (!this.initPromise) {
 			this.initPromise = this.audioCtx.audioWorklet.addModule(this.workletUrl);
 		}
@@ -35,19 +44,63 @@ export class AudioRenderer {
 	}
 
 	/**
-	 * Sends the SharedArrayBuffer to the Worklet for memory sharing.
+	 * Sends the SharedArrayBuffer and Wasm binary to the Worklet.
 	 */
-	public bindQueue(sharedBuffer: SharedArrayBuffer, channels: number): void {
-		if (!this._isWorkletLoaded || !this.workletNode) {
-			console.warn(
-				"AudioRenderer: Cannot bind queue. Worklet is not loaded yet.",
-			);
-			return;
-		}
+	public bindQueue(
+		sharedBuffer: SharedArrayBuffer,
+		channels: number,
+	): Promise<void> {
+		return new Promise((resolve, reject) => {
+			if (!this._isWorkletLoaded || !this.workletNode) {
+				return reject(new Error("Worklet not loaded"));
+			}
 
-		this.workletNode.port.postMessage({
-			type: "INIT_SAB",
-			payload: { sharedBuffer, channels },
+			const currentInitId = ++this.initCounter;
+			const messageHandler = (event: MessageEvent) => {
+				const { type, payload } = event.data;
+
+				if (
+					type === "INIT_DONE" &&
+					payload?.initId === currentInitId &&
+					this.workletNode
+				) {
+					this.workletNode.port.removeEventListener("message", messageHandler);
+					resolve();
+				}
+			};
+
+			this.workletNode.port.addEventListener("message", messageHandler);
+			this.workletNode.port.start();
+			this.workletNode.port.postMessage({
+				type: "INIT",
+				payload: {
+					sharedBuffer,
+					channels,
+					wasmBytes: this.stWasmBytes,
+					initId: currentInitId,
+				},
+			});
+		});
+	}
+
+	public setTempo(tempo: number): void {
+		this.workletNode?.port.postMessage({
+			type: "SET_TEMPO",
+			payload: { tempo },
+		});
+	}
+
+	public setPitch(pitch: number): void {
+		this.workletNode?.port.postMessage({
+			type: "SET_PITCH",
+			payload: { pitch },
+		});
+	}
+
+	public setRate(rate: number): void {
+		this.workletNode?.port.postMessage({
+			type: "SET_RATE",
+			payload: { rate },
 		});
 	}
 

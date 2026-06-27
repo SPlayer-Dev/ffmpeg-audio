@@ -10,13 +10,11 @@
 		"preview": "vite preview",
 		"check": "tsgo -b"
 	},
-	"dependencies": {
+	"devDependencies": {
+		"vite": "^8.1.0",
 		"@types/audioworklet": "^0.0.100",
 		"@types/node": "^26.0.1",
 		"@types/wicg-file-system-access": "^2023.10.7",
 		"@typescript/native-preview": "^7.0.0-dev.20260624.1"
-	},
-	"devDependencies": {
-		"vite": "^8.1.0"
 	}
 }

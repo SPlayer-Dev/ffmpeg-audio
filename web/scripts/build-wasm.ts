@@ -19,20 +19,57 @@ try {
 	process.exit(1);
 }
 
-const outDir = resolve(webRoot, "src/audio-core/worker/wasm");
-if (!existsSync(outDir)) {
-	mkdirSync(outDir, { recursive: true });
+const ffmpegOutDir = resolve(webRoot, "src/audio-core/worker/wasm");
+if (!existsSync(ffmpegOutDir)) {
+	mkdirSync(ffmpegOutDir, { recursive: true });
 }
 
-const filesToCopy = ["ffmpeg_wasm.js", "ffmpeg_wasm.wasm"];
-const releaseDir = resolve(
+const ffmpegFiles = ["ffmpeg_wasm.js", "ffmpeg_wasm.wasm"];
+const ffmpegReleaseDir = resolve(
 	projectRoot,
 	"target/wasm32-unknown-emscripten/release",
 );
 
-for (const file of filesToCopy) {
-	const src = resolve(releaseDir, file);
-	const dest = resolve(outDir, file);
+for (const file of ffmpegFiles) {
+	const src = resolve(ffmpegReleaseDir, file);
+	const dest = resolve(ffmpegOutDir, file);
+
+	if (existsSync(src)) {
+		copyFileSync(src, dest);
+		console.log(`  ✅ Copied: ${file}`);
+	} else {
+		console.error(`  ⚠️ File not found: ${src}`);
+		process.exit(1);
+	}
+}
+
+const stCrateDir = resolve(projectRoot, "crates/soundtouch");
+
+try {
+	execSync(`wasm-pack build ${stCrateDir} --target web --release`, {
+		cwd: projectRoot,
+		stdio: "inherit",
+	});
+} catch {
+	process.exit(1);
+}
+
+const stOutDir = resolve(webRoot, "src/audio-core/worklet/wasm");
+if (!existsSync(stOutDir)) {
+	mkdirSync(stOutDir, { recursive: true });
+}
+
+const stFiles = [
+	".gitignore",
+	"soundtouch.js",
+	"soundtouch_bg.wasm",
+	"soundtouch.d.ts",
+];
+const stPkgDir = resolve(stCrateDir, "pkg");
+
+for (const file of stFiles) {
+	const src = resolve(stPkgDir, file);
+	const dest = resolve(stOutDir, file);
 
 	if (existsSync(src)) {
 		copyFileSync(src, dest);

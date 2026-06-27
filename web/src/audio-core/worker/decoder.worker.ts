@@ -21,9 +21,9 @@ yieldChannel.port1.onmessage = () => {
 	processFrame();
 };
 
-async function initWasm(wasmUrl: string): Promise<FFmpegWasmModule> {
+async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
 	return await (createModule as unknown as FFmpegWasmModuleFactory)({
-		locateFile: () => wasmUrl,
+		locateFile: () => ffmpegWasmUrl,
 
 		js_get_file_size: (_file_id: number): number => {
 			return audioFile ? audioFile.size : -1;
@@ -142,7 +142,7 @@ self.onmessage = async (e: MessageEvent) => {
 			targetSampleRate = payload.sampleRate;
 			targetChannels = payload.channels;
 			audioWriter = createAudioWriter(payload.sharedBuffer, targetChannels);
-			wasmModule = await initWasm(payload.wasmUrl);
+			wasmModule = await initWasm(payload.ffmpegWasmUrl);
 
 			decoderPtr = wasmModule._wasm_decoder_create(
 				1,
