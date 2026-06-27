@@ -13,7 +13,7 @@
 	},
 	"imports": {
 		"@biomejs/biome": "npm:@biomejs/biome@^2.4.15",
-		"@std/fs": "jsr:@std/fs@^1.0.23",
+		"@std/fs": "jsr:@std/fs@^1.0.24",
 		"@std/path": "jsr:@std/path@^1.1.4",
 		"jszip": "npm:jszip@^3.10.1"
 	}
