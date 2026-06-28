@@ -7,7 +7,7 @@ rustflags = [
     "link-arg=-sALLOW_MEMORY_GROWTH=1",
 
     "-C",
-    "link-arg=-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_wasm_decoder_create','_wasm_decoder_destroy','_wasm_decoder_decode_frame','_wasm_decoder_get_frame_samples','_wasm_decoder_get_channel_ptr','_wasm_decoder_seek','_wasm_decoder_get_duration','_wasm_decoder_get_metadata_json','_wasm_decoder_get_cover_ptr','_wasm_decoder_get_cover_size','_wasm_decoder_get_cover_mime']",
+    "link-arg=-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_wasm_decoder_create','_wasm_decoder_destroy','_wasm_decoder_decode_frame','_wasm_decoder_get_frame_samples','_wasm_decoder_get_channel_ptr','_wasm_decoder_seek','_wasm_decoder_get_duration','_wasm_decoder_get_metadata_json','_wasm_decoder_get_cover_ptr','_wasm_decoder_get_cover_size','_wasm_decoder_get_cover_mime', '_wasm_decoder_set_compute_peaks', '_wasm_decoder_get_frame_min', '_wasm_decoder_get_frame_max']",
 
     "-C",
     "link-arg=-sEXPORTED_RUNTIME_METHODS=['getValue','setValue','wasmMemory','HEAPF32', 'UTF8ToString']",
@@ -17,11 +17,48 @@ rustflags = [
     "link-arg=-sMODULARIZE=1",
     "-C",
     "link-arg=-sNO_EXIT_RUNTIME=1",
-    "-C",
-    "link-arg=-sDISABLE_EXCEPTION_CATCHING=1",
 
     "-C",
-    "link-arg=--profiling",
+    "link-arg=-O3",
+
+    "-C",
+    "target-feature=+simd128",
+
+    "-C",
+    "target-feature=+bulk-memory",
+
+    "-C",
+    "target-feature=+nontrapping-fptoint",
+
+    "-C",
+    "target-feature=+sign-ext",
+
+    "-C",
+    "target-feature=+mutable-globals",
+
+    "-C",
+    "link-arg=-g1",
+
+    "-C",
+    "link-arg=-closure=0",
 ]
 
 runner = "node"
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C",
+    "target-feature=+simd128",
+
+    "-C",
+    "target-feature=+bulk-memory",
+
+    "-C",
+    "target-feature=+nontrapping-fptoint",
+
+    "-C",
+    "target-feature=+sign-ext",
+
+    "-C",
+    "target-feature=+mutable-globals",
+]
