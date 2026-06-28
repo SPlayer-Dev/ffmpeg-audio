@@ -16,8 +16,12 @@ export interface FFmpegWasmModule {
 		sampleRate: number,
 		channels: number,
 	): number;
+	_wasm_decoder_destroy(decoderPtr: number): number;
+
 	_wasm_decoder_decode_frame(decoderPtr: number): number;
 	_wasm_decoder_get_frame_samples(decoderPtr: number): number;
+	_wasm_decoder_get_frame_min(decoderPtr: number): number;
+	_wasm_decoder_get_frame_max(decoderPtr: number): number;
 	_wasm_decoder_get_channel_ptr(
 		decoderPtr: number,
 		channelIndex: number,
@@ -28,6 +32,8 @@ export interface FFmpegWasmModule {
 	_wasm_decoder_get_cover_ptr(decoderPtr: number): number;
 	_wasm_decoder_get_cover_size(decoderPtr: number): number;
 	_wasm_decoder_get_cover_mime(decoderPtr: number): number;
+
+	_wasm_decoder_set_compute_peaks(decoderPtr: number, enable: number): number;
 
 	UTF8ToString(
 		ptr: number,

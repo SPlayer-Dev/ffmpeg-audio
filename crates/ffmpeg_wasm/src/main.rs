@@ -24,6 +24,10 @@ pub struct DecoderContext {
     metadata_json: CString,
     cover_data: Vec<u8>,
     cover_mime: Option<CString>,
+
+    compute_peaks: bool,
+    frame_min: f32,
+    frame_max: f32,
 }
 
 #[unsafe(no_mangle)]
@@ -82,6 +86,9 @@ pub unsafe extern "C" fn wasm_decoder_create(
         metadata_json,
         cover_data,
         cover_mime,
+        compute_peaks: false,
+        frame_min: 0.0,
+        frame_max: 0.0,
     });
     Box::into_raw(ctx)
 }
@@ -108,11 +115,47 @@ pub unsafe extern "C" fn wasm_decoder_decode_frame(ctx_ptr: *mut DecoderContext)
             ctx.current_samples = channels_data[0].len();
             ctx.current_ptrs = channels_data.iter().map(|slice| slice.as_ptr()).collect();
 
+            if ctx.compute_peaks && !channels_data[0].is_empty() {
+                let ch0 = channels_data[0];
+                let (mut min_val, mut max_val) = (ch0[0], ch0[0]);
+                for &val in ch0 {
+                    if val < min_val {
+                        min_val = val;
+                    }
+                    if val > max_val {
+                        max_val = val;
+                    }
+                }
+                ctx.frame_min = min_val;
+                ctx.frame_max = max_val;
+            } else {
+                ctx.frame_min = 0.0;
+                ctx.frame_max = 0.0;
+            }
+
             1
         }
         Ok(None) => 0,
         Err(_) => -1,
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasm_decoder_set_compute_peaks(ctx_ptr: *mut DecoderContext, enable: i32) {
+    let ctx = unsafe { &mut *ctx_ptr };
+    ctx.compute_peaks = enable != 0;
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasm_decoder_get_frame_min(ctx_ptr: *mut DecoderContext) -> f32 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    ctx.frame_min
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasm_decoder_get_frame_max(ctx_ptr: *mut DecoderContext) -> f32 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    ctx.frame_max
 }
 
 #[unsafe(no_mangle)]
