@@ -2,6 +2,7 @@ export class AudioRenderer {
 	private initCounter = 0;
 
 	private workletNode: AudioWorkletNode | null = null;
+	private gainNode: GainNode | null;
 	private _isWorkletLoaded = false;
 	private initPromise: Promise<void> | null = null;
 	private stWasmBytes: ArrayBuffer | null = null;
@@ -10,7 +11,10 @@ export class AudioRenderer {
 		private audioCtx: AudioContext,
 		private workletUrl: string,
 		private stWasmUrl: string,
-	) {}
+		gainNode?: GainNode,
+	) {
+		this.gainNode = gainNode || null;
+	}
 
 	/**
 	 * Returns true if the AudioWorklet has been completely loaded.
@@ -40,7 +44,11 @@ export class AudioRenderer {
 			outputChannelCount: [channels],
 		});
 
-		this.workletNode.connect(this.audioCtx.destination);
+		if (this.gainNode) {
+			this.workletNode.connect(this.gainNode);
+		} else {
+			this.workletNode.connect(this.audioCtx.destination);
+		}
 	}
 
 	/**

@@ -12,8 +12,13 @@ async function bootstrap() {
 	const audioCtx = new AudioContextClass();
 	await audioCtx.suspend();
 
+	const mainGainNode = audioCtx.createGain();
+	mainGainNode.gain.value = 1.0;
+	mainGainNode.connect(audioCtx.destination);
+
 	const engine = new FFmpegAudioEngine({
 		audioContext: audioCtx,
+		gainNode: mainGainNode,
 		assets: {
 			workerUrl,
 			workletUrl,

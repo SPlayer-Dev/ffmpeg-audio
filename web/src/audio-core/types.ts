@@ -8,6 +8,11 @@ export interface EngineConfig {
 	audioContext: AudioContext;
 
 	/**
+	 * Injected GainNode for volume control
+	 */
+	gainNode?: GainNode;
+
+	/**
 	 * URLs for external static resources, typically resolved by the host's build tool.
 	 */
 	assets: {

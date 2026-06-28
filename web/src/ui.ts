@@ -13,6 +13,11 @@ export class AppUI {
 	private coverArt = document.getElementById("cover-art") as HTMLDivElement;
 	private metadataDiv = document.getElementById("metadata") as HTMLDivElement;
 
+	private sliderVolume = document.getElementById(
+		"slider-volume",
+	) as HTMLInputElement;
+	private valVolume = document.getElementById("val-volume") as HTMLSpanElement;
+
 	private sliderTempo = document.getElementById(
 		"slider-tempo",
 	) as HTMLInputElement;
@@ -58,6 +63,12 @@ export class AppUI {
 			this.timeCurrent.textContent = this.formatTime(targetSeconds);
 		});
 
+		this.sliderVolume.addEventListener("input", (e) => {
+			const val = parseFloat((e.target as HTMLInputElement).value);
+			this.valVolume.textContent = `${Math.round(val * 100)}%`;
+			this.engine.volume = val;
+		});
+
 		this.seekBar.addEventListener("change", (e) => {
 			this.isDragging = false;
 			const targetSeconds = parseFloat((e.target as HTMLInputElement).value);
@@ -96,6 +107,7 @@ export class AppUI {
 			this.playBtn.disabled = false;
 			this.pauseBtn.disabled = false;
 			this.seekBar.disabled = false;
+			this.sliderVolume.disabled = false;
 
 			this.sliderTempo.disabled = false;
 			this.sliderPitch.disabled = false;

@@ -27,6 +27,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	private _metadata: Record<string, string> = {};
 	private _cover: PlayerCover | null = null;
 	private _error: EngineError | null = null;
+	private _volume = 1.0;
 	private baseTime = 0;
 
 	private _tempo = 1.0;
@@ -44,6 +45,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 			config.audioContext,
 			config.assets.workletUrl,
 			config.assets.soundtouchWasmUrl,
+			config.gainNode,
 		);
 
 		this.workerClient = new DecoderWorkerClient(config.assets.workerUrl, {
@@ -68,6 +70,21 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	}
 	public get error(): EngineError | null {
 		return this._error;
+	}
+	public get volume(): number {
+		return this._volume;
+	}
+	public set volume(val: number) {
+		this._volume = Math.max(0, Math.min(1, val));
+
+		if (this.config.gainNode) {
+			const ctx = this.config.audioContext;
+			this.config.gainNode.gain.setTargetAtTime(
+				this._volume,
+				ctx.currentTime,
+				0.1,
+			);
+		}
 	}
 
 	public get currentTime(): number {
