@@ -1,11 +1,36 @@
 use std::{
     ffi::CStr,
+    io::{
+        Error as IoError,
+        ErrorKind as IoErrorKind,
+    },
     os::raw::c_int,
 };
 
 use thiserror::Error;
 
 use crate::sys;
+
+#[derive(Debug, Error)]
+pub enum HttpError {
+    #[error("Server does not support Range requests")]
+    UnsupportedRange,
+
+    #[error("Unknown stream length (no valid Content-Range or Content-Length found)")]
+    UnknownLength,
+
+    #[error("HTTP error status: {0}")]
+    Status(u16),
+
+    #[error("Operation cancelled by user")]
+    Cancelled,
+
+    #[error("Max network retries reached or required retry delay exceeds safety limit")]
+    Timeout,
+
+    #[error("Transport error: {0}")]
+    Transport(String),
+}
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -26,6 +51,9 @@ pub enum AudioError {
 
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
+
+    #[error("HTTP error: {0}")]
+    Http(#[from] HttpError),
 }
 
 impl AudioError {
@@ -48,6 +76,25 @@ impl AudioError {
 
                 Self::FFmpeg(code, error_message)
             }
+        }
+    }
+}
+
+impl From<AudioError> for IoError {
+    fn from(err: AudioError) -> Self {
+        match err {
+            AudioError::Io(e) => e,
+            AudioError::Eof => Self::new(IoErrorKind::UnexpectedEof, err.to_string()),
+            AudioError::Http(HttpError::Cancelled) => {
+                Self::new(IoErrorKind::Interrupted, err.to_string())
+            }
+            AudioError::Http(HttpError::Timeout) => {
+                Self::new(IoErrorKind::TimedOut, err.to_string())
+            }
+            AudioError::Http(HttpError::Status(status)) if (401..=403).contains(&status) => {
+                Self::new(IoErrorKind::PermissionDenied, err.to_string())
+            }
+            _ => Self::other(err.to_string()),
         }
     }
 }
