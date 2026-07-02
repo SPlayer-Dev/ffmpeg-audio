@@ -149,7 +149,7 @@ impl AudioReader {
     /// * `Some(Duration)` representing the current decode position.
     /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
     #[must_use]
-    pub const fn stream_position(&self) -> Option<Duration> {
+    pub fn stream_position(&self) -> Option<Duration> {
         self.engine.stream_position()
     }
 

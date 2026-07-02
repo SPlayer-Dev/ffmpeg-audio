@@ -335,7 +335,12 @@ impl DecodeEngine {
     /// # Returns
     /// * `Some(Duration)` representing the current playback position.
     /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
-    pub const fn stream_position(&self) -> Option<Duration> {
-        self.current_pts
+    pub fn stream_position(&self) -> Option<Duration> {
+        if self.has_buffered_seek_frame {
+            let frame_ptr = self.decoder.current_frame();
+            AudioFrame::new(frame_ptr, self.time_base).pts()
+        } else {
+            self.current_pts
+        }
     }
 }

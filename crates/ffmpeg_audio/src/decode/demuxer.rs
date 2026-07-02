@@ -127,12 +127,9 @@ impl Demuxer {
 
             let target_us = target.as_micros() as i64;
 
-            let lower_us = (target_us.saturating_sub(1_000_000)).max(0);
-            let upper_us = target_us.saturating_add(1_000_000);
-
             let pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
-            let min_pts = sys::av_rescale_q(lower_us, sys::MICROSECONDS_Q, time_base);
-            let max_pts = sys::av_rescale_q(upper_us, sys::MICROSECONDS_Q, time_base);
+            let min_pts = i64::MIN;
+            let max_pts = pts;
 
             let mut ret = sys::avformat_seek_file(
                 self.ctx,
