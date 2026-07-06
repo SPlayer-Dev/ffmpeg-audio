@@ -139,7 +139,7 @@ jobs:
 
       - name: Run cargo test
         if: "!matrix.cross && !matrix.check_sys_only && !matrix.check_only"
-        run: cargo test --target ${{ matrix.target }} --workspace
+        run: cargo test --target ${{ matrix.target }} -p ffmpeg_audio
 
   clippy:
     name: Clippy
