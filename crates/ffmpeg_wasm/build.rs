@@ -1,0 +1,58 @@
+use std::env;
+
+fn main() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "emscripten" {
+        return;
+    }
+
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let js_library = format!("{manifest_dir}/library_ffmpeg.js");
+
+    let exports = [
+        "_main",
+        "_malloc",
+        "_free",
+        "_wasm_decoder_create",
+        "_wasm_decoder_destroy",
+        "_wasm_decoder_decode_frame",
+        "_wasm_decoder_get_frame_samples",
+        "_wasm_decoder_get_channel_ptr",
+        "_wasm_decoder_seek",
+        "_wasm_decoder_get_duration",
+        "_wasm_decoder_get_metadata_json",
+        "_wasm_decoder_get_cover_ptr",
+        "_wasm_decoder_get_cover_size",
+        "_wasm_decoder_get_cover_mime",
+        "_wasm_decoder_set_compute_peaks",
+        "_wasm_decoder_get_frame_min",
+        "_wasm_decoder_get_frame_max",
+    ];
+    let exports_json = serde_json::to_string(&exports).unwrap();
+
+    let runtime_methods = [
+        "getValue",
+        "setValue",
+        "wasmMemory",
+        "HEAPF32",
+        "UTF8ToString",
+    ];
+    let runtime_json = serde_json::to_string(&runtime_methods).unwrap();
+
+    let link_args = [
+        format!("--js-library={js_library}"),
+        "-sALLOW_MEMORY_GROWTH=1".into(),
+        format!("-sEXPORTED_FUNCTIONS={exports_json}"),
+        format!("-sEXPORTED_RUNTIME_METHODS={runtime_json}"),
+        "-sEXPORT_ES6=1".into(),
+        "-sMODULARIZE=1".into(),
+        "-sNO_EXIT_RUNTIME=1".into(),
+        "-O3".into(),
+        "-g1".into(),
+        "-closure=0".into(),
+    ];
+
+    for arg in &link_args {
+        println!("cargo:rustc-link-arg={arg}");
+    }
+}
