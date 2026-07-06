@@ -399,6 +399,7 @@ fn test_planar_format_mismatch_rejection_planar_to_packed() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_seek_accuracy() {
     let file = File::open(AAC_SEEK_PATH).expect("Failed to open AAC test asset");
     let mut reader = AudioReader::new(file).unwrap();
@@ -432,6 +433,7 @@ fn test_seek_accuracy() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_hot_reload_on_format_mutation() {
     let file = File::open(MUTATION_AAC_PATH).unwrap();
     let reader = AudioReader::new(file).unwrap();
