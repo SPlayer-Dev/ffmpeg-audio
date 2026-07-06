@@ -1,4 +1,5 @@
 use std::{
+    fs::File,
     io::Cursor,
     time::Duration,
 };
@@ -6,7 +7,11 @@ use std::{
 use ffmpeg_audio::{
     AudioReader,
     ResampleOptions,
+    SeekMode,
 };
+
+const AAC_SEEK_PATH: &str = "tests/assets/seek_test.aac";
+const MUTATION_AAC_PATH: &str = "tests/assets/format_mutation.aac";
 
 fn generate_sine_wav(duration_secs: f32) -> Vec<u8> {
     let sample_rate: u32 = 44100;
@@ -123,7 +128,9 @@ fn test_audio_seek_functionality() {
     let _ = resampled.receive_frame_as::<f32>().unwrap();
 
     let target = Duration::from_secs_f32(1.0);
-    resampled.seek(target).expect("Seek 调用失败");
+    resampled
+        .seek(target, SeekMode::default())
+        .expect("Seek 调用失败");
 
     let frame_after_seek = resampled
         .receive_frame_as::<f32>()
@@ -188,7 +195,9 @@ fn test_stream_position_resets_after_seek() {
     resampled.receive_frame_as::<f32>().unwrap();
     assert!(resampled.source().stream_position().is_some());
 
-    resampled.seek(Duration::from_secs(0)).unwrap();
+    resampled
+        .seek(Duration::from_secs(0), SeekMode::default())
+        .unwrap();
     assert!(
         resampled.source().stream_position().is_none(),
         "Seek 后 stream_position 应重置为 None"
@@ -230,7 +239,9 @@ fn test_seek_updates_pts_and_aligns_target() {
     resampled.receive_frame_as::<f32>().unwrap();
 
     let target = Duration::from_secs_f32(1.0);
-    resampled.seek(target).expect("Seek 调用失败");
+    resampled
+        .seek(target, SeekMode::Accurate)
+        .expect("Seek 调用失败");
 
     assert!(
         resampled.source().stream_position().is_none(),
@@ -277,7 +288,7 @@ fn test_seek_near_eof_does_not_panic_or_loop() {
         .unwrap();
 
     let target = Duration::from_secs_f32(0.99);
-    resampled.seek(target).unwrap();
+    resampled.seek(target, SeekMode::default()).unwrap();
 
     let mut frames_read = 0;
     while resampled.receive_frame_as::<f32>().unwrap().is_some() {
@@ -384,5 +395,73 @@ fn test_planar_format_mismatch_rejection_planar_to_packed() {
     assert!(
         matches!(result, Err(ffmpeg_audio::AudioError::FormatMismatch)),
         "期望返回 FormatMismatch 错误，但得到了: {result:?}"
+    );
+}
+
+#[test]
+fn test_seek_accuracy() {
+    let file = File::open(AAC_SEEK_PATH).expect("Failed to open AAC test asset");
+    let mut reader = AudioReader::new(file).unwrap();
+
+    let target = Duration::from_millis(501);
+
+    reader.seek(target, SeekMode::Coarse).unwrap();
+    let (coarse_pts, coarse_samples) = {
+        let frame = reader.receive_frame().unwrap().unwrap();
+        (frame.pts().unwrap(), frame.samples())
+    };
+
+    assert!(coarse_pts < target, "Coarse seek PTS should be < target");
+
+    reader.seek(target, SeekMode::Accurate).unwrap();
+    let (accurate_pts, accurate_samples) = {
+        let frame = reader.receive_frame().unwrap().unwrap();
+        (frame.pts().unwrap(), frame.samples())
+    };
+
+    assert_eq!(
+        accurate_pts.as_millis(),
+        target.as_millis(),
+        "Accurate seek PTS must exactly match the target"
+    );
+
+    assert!(
+        accurate_samples < coarse_samples,
+        "Accurate frame should be trimmed ({accurate_samples} < {coarse_samples})"
+    );
+}
+
+#[test]
+fn test_hot_reload_on_format_mutation() {
+    let file = File::open(MUTATION_AAC_PATH).unwrap();
+    let reader = AudioReader::new(file).unwrap();
+
+    let options = ResampleOptions::new()
+        .format::<f32>()
+        .channels(2)
+        .sample_rate(48000);
+
+    let mut resampled_reader = reader.into_resampled(options).unwrap();
+
+    let mut total_samples = 0;
+
+    loop {
+        match resampled_reader.receive_frame_as::<f32>() {
+            Ok(Some(samples)) => {
+                assert_eq!(
+                    samples.len() % 2,
+                    0,
+                    "Output slice must be interleaved stereo"
+                );
+                total_samples += samples.len() / 2;
+            }
+            Ok(None) => break,
+            Err(e) => panic!("Failed to receive frame: {e:?}"),
+        }
+    }
+
+    assert!(
+        total_samples > 0,
+        "Should have successfully decoded mutated stream"
     );
 }

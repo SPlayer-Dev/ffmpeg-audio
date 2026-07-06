@@ -13,6 +13,7 @@ use ffmpeg_audio::{
     AudioReader,
     ResampleOptions,
     ResampledReader,
+    SeekMode,
 };
 use io::JsFileAccess;
 
@@ -28,9 +29,6 @@ pub struct DecoderContext {
     compute_peaks: bool,
     frame_min: f32,
     frame_max: f32,
-
-    target_sample_rate: i32,
-    pending_skip_samples: usize,
 }
 
 #[unsafe(no_mangle)]
@@ -92,8 +90,6 @@ pub unsafe extern "C" fn wasm_decoder_create(
         compute_peaks: false,
         frame_min: 0.0,
         frame_max: 0.0,
-        target_sample_rate,
-        pending_skip_samples: 0,
     });
     Box::into_raw(ctx)
 }
@@ -114,33 +110,20 @@ pub unsafe extern "C" fn wasm_decoder_decode_frame(ctx_ptr: *mut DecoderContext)
     loop {
         match ctx.reader.receive_planar_as::<f32>() {
             Ok(Some(channels_data)) => {
-                let original_len = channels_data[0].len();
-                if original_len == 0 {
+                if channels_data.is_empty() {
                     continue;
                 }
 
-                let mut len = original_len;
-                let mut offset = 0;
-
-                if ctx.pending_skip_samples > 0 {
-                    if ctx.pending_skip_samples >= len {
-                        ctx.pending_skip_samples -= len;
-                        continue;
-                    }
-
-                    offset = ctx.pending_skip_samples;
-                    len -= offset;
-                    ctx.pending_skip_samples = 0;
+                let len = channels_data[0].len();
+                if len == 0 {
+                    continue;
                 }
 
                 ctx.current_samples = len;
-                ctx.current_ptrs = channels_data
-                    .iter()
-                    .map(|slice| slice[offset..].as_ptr())
-                    .collect();
+                ctx.current_ptrs = channels_data.iter().map(|slice| slice.as_ptr()).collect();
 
-                if ctx.compute_peaks && len > 0 {
-                    let ch0 = &channels_data[0][offset..(offset + len)];
+                if ctx.compute_peaks {
+                    let ch0 = channels_data[0];
                     let (mut min_val, mut max_val) = (ch0[0], ch0[0]);
 
                     for &val in ch0 {
@@ -216,20 +199,9 @@ pub unsafe extern "C" fn wasm_decoder_seek(
     let ctx = unsafe { &mut *ctx_ptr };
     let duration = Duration::from_secs_f64(target_seconds);
 
-    if ctx.reader.seek(duration).is_ok() {
+    if ctx.reader.seek(duration, SeekMode::Accurate).is_ok() {
         ctx.current_samples = 0;
         ctx.current_ptrs.clear();
-
-        let real_pts = ctx
-            .reader
-            .source()
-            .stream_position()
-            .unwrap_or(Duration::ZERO)
-            .as_secs_f64();
-
-        let diff = (target_seconds - real_pts).max(0.0);
-        ctx.pending_skip_samples = (diff * f64::from(ctx.target_sample_rate)).round() as usize;
-
         1
     } else {
         -1

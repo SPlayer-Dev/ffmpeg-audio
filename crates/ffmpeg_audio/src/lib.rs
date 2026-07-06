@@ -21,7 +21,10 @@ use std::{
     time::Duration,
 };
 
-pub use decode::ScanMode;
+pub use decode::{
+    ScanMode,
+    SeekMode,
+};
 pub use error::{
     AudioError,
     FfErrorExt,
@@ -90,8 +93,12 @@ impl AudioReader {
     }
 
     /// Seeks the underlying audio stream to the specified target duration.
-    pub fn seek(&mut self, target: Duration) -> Result<()> {
-        self.engine.seek(target)
+    ///
+    /// # Arguments
+    /// * `target` - The target duration to seek to.
+    /// * `mode` - The strategy ([`SeekMode`]) to employ for resolving the exact position.
+    pub fn seek(&mut self, target: Duration, mode: SeekMode) -> Result<()> {
+        self.engine.seek(target, mode)
     }
 
     /// Scans the entire audio stream to calculate its exact duration.
@@ -149,7 +156,7 @@ impl AudioReader {
     /// * `Some(Duration)` representing the current decode position.
     /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
     #[must_use]
-    pub fn stream_position(&self) -> Option<Duration> {
+    pub const fn stream_position(&self) -> Option<Duration> {
         self.engine.stream_position()
     }
 
@@ -252,8 +259,12 @@ impl ResampledReader {
     /// Seeks the underlying audio stream to the specified target duration.
     ///
     /// Also flushes both the decoder and the resampler.
-    pub fn seek(&mut self, target: Duration) -> Result<()> {
-        self.reader.seek(target)?;
+    ///
+    /// # Arguments
+    /// * `target` - The target duration to seek to.
+    /// * `mode` - The strategy ([`SeekMode`]) to employ for resolving the exact position.
+    pub fn seek(&mut self, target: Duration, mode: SeekMode) -> Result<()> {
+        self.reader.seek(target, mode)?;
         self.resampler.flush()?;
         Ok(())
     }

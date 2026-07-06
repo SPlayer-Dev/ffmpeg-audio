@@ -8,7 +8,10 @@ use std::{
 
 use crate::{
     AudioFrame,
-    core::format::AudioSample,
+    core::{
+        format::AudioSample,
+        layout::ChannelLayout,
+    },
     error::{
         AudioError,
         Result,
@@ -105,43 +108,51 @@ impl ResampleOptions {
 pub struct Resampler {
     swr: SwrContext,
     options: ResampleOptions,
+    in_sample_fmt: sys::AVSampleFormat,
+    in_sample_rate: i32,
+    in_layout: ChannelLayout,
+    in_channels: usize,
     buffer: RawAudioBuffer,
+    in_ptrs_scratch: Vec<*const u8>,
     actual_samples_per_channel: usize,
     stride_samples_per_channel: usize,
 }
 
 impl Resampler {
     pub fn new(
-        in_layout: &sys::AVChannelLayout,
+        in_layout_ptr: &sys::AVChannelLayout,
         in_sample_fmt: sys::AVSampleFormat,
         in_sample_rate: i32,
         options: ResampleOptions,
     ) -> Result<Self> {
         options.validate()?;
 
-        unsafe {
-            let mut out_layout = mem::zeroed::<sys::AVChannelLayout>();
-            sys::av_channel_layout_default(&raw mut out_layout, options.target_channels);
+        let out_layout = ChannelLayout::from_default(options.target_channels);
+        let in_layout = ChannelLayout::from_existing(in_layout_ptr)?;
 
-            let swr = SwrContext::new(
-                &out_layout,
-                options.target_sample_fmt,
-                options.target_sample_rate,
-                in_layout,
-                in_sample_fmt,
-                in_sample_rate,
-            )?;
+        let swr = SwrContext::new(
+            out_layout.as_layout(),
+            options.target_sample_fmt,
+            options.target_sample_rate,
+            in_layout.as_layout(),
+            in_sample_fmt,
+            in_sample_rate,
+        )?;
 
-            sys::av_channel_layout_uninit(&raw mut out_layout);
+        let in_channels = in_layout.channels();
 
-            Ok(Self {
-                swr,
-                options,
-                buffer: RawAudioBuffer::default(),
-                actual_samples_per_channel: 0,
-                stride_samples_per_channel: 0,
-            })
-        }
+        Ok(Self {
+            swr,
+            options,
+            in_sample_fmt,
+            in_sample_rate,
+            in_layout,
+            in_channels,
+            buffer: RawAudioBuffer::default(),
+            in_ptrs_scratch: Vec::with_capacity(in_channels),
+            actual_samples_per_channel: 0,
+            stride_samples_per_channel: 0,
+        })
     }
 
     /// Returns the target sample format configured for this resampler.
@@ -173,33 +184,38 @@ impl Resampler {
         }
 
         unsafe {
-            let raw_ptr = frame.map_or(ptr::null(), AudioFrame::as_ptr);
+            if let Some(f) = frame {
+                self.check_and_hot_reload(f)?;
+            }
 
-            let (in_data, in_samples) = if raw_ptr.is_null() {
-                (ptr::null(), 0)
-            } else {
-                (
-                    (*raw_ptr).extended_data as *const *const u8,
-                    (*raw_ptr).nb_samples,
-                )
-            };
+            let raw_ptr = frame.map_or(ptr::null(), AudioFrame::as_ptr);
+            let (frame_offset, logical_samples) =
+                frame.map_or((0, 0), |f| (f.offset(), f.samples()));
+
+            let in_data = Self::calculate_adjusted_pointers(
+                raw_ptr,
+                frame_offset,
+                self.in_sample_fmt,
+                self.in_channels,
+                &mut self.in_ptrs_scratch,
+            );
+
+            let in_samples_i32 = logical_samples as i32;
+            let expected_out_samples = self.swr.get_out_samples(in_samples_i32)?;
 
             debug_assert!(
-                in_samples == 0 || !in_data.is_null(),
+                in_samples_i32 == 0 || !in_data.is_null(),
                 "in_data is null but in_samples is > 0."
             );
-            debug_assert!(in_samples >= 0, "in_samples cannot be negative.");
+            debug_assert!(in_samples_i32 >= 0, "in_samples cannot be negative.");
 
-            let expected_out_samples = self.swr.get_out_samples(in_samples)?;
             if expected_out_samples <= 0 {
                 self.actual_samples_per_channel = 0;
                 return Ok(false);
             }
 
             let out_channels = self.options.target_channels as usize;
-
-            let bytes_needed =
-                (expected_out_samples as usize) * out_channels * std::mem::size_of::<T>();
+            let bytes_needed = (expected_out_samples as usize) * out_channels * mem::size_of::<T>();
 
             self.buffer.reserve_bytes(bytes_needed);
             self.stride_samples_per_channel = expected_out_samples as usize;
@@ -214,15 +230,104 @@ impl Resampler {
             );
 
             let actual_samples = if is_planar {
-                self.swr
-                    .convert_planar(in_data, in_samples, out_buf_slice, expected_out_samples)?
+                self.swr.convert_planar(
+                    in_data,
+                    in_samples_i32,
+                    out_buf_slice,
+                    expected_out_samples,
+                )?
             } else {
                 self.swr
-                    .convert_packed(in_data, in_samples, out_buf_slice)?
+                    .convert_packed(in_data, in_samples_i32, out_buf_slice)?
             };
 
             self.actual_samples_per_channel = actual_samples;
             Ok(self.actual_samples_per_channel > 0)
+        }
+    }
+
+    /// Dynamically rebuilds the underlying SwrContext if the incoming frame's
+    /// layout, format, or sample rate differs from the currently cached configuration.
+    ///
+    /// # Safety
+    /// Must only be called with a valid `AudioFrame`.
+    fn check_and_hot_reload(&mut self, frame: &AudioFrame<'_>) -> Result<()> {
+        let frame_fmt = frame.sample_fmt();
+        let frame_rate = frame.frame_sample_rate();
+        let frame_layout_ptr = frame.channel_layout();
+
+        let needs_reload = frame_fmt != self.in_sample_fmt
+            || frame_rate != self.in_sample_rate
+            || !self.in_layout.is_identical_to(frame_layout_ptr);
+
+        if needs_reload {
+            #[cfg(feature = "tracing")]
+            tracing::info!("Audio format changed mid-stream. Rebuilding resampler pipeline.");
+
+            let out_layout = ChannelLayout::from_default(self.options.target_channels);
+            let temp_in_layout = ChannelLayout::from_existing(frame_layout_ptr)?;
+
+            let new_swr = SwrContext::new(
+                out_layout.as_layout(),
+                self.options.target_sample_fmt,
+                self.options.target_sample_rate,
+                temp_in_layout.as_layout(),
+                frame_fmt,
+                frame_rate,
+            )?;
+
+            self.in_layout = temp_in_layout;
+            self.swr = new_swr;
+            self.in_sample_fmt = frame_fmt;
+            self.in_sample_rate = frame_rate;
+            self.in_channels = self.in_layout.channels();
+        }
+
+        Ok(())
+    }
+
+    /// Calculates and returns an array of pointers adjusted by `offset`.
+    ///
+    /// Extracted as a stateless associated function to guarantee testability
+    /// without mocking FFI contexts.
+    ///
+    /// # Safety
+    /// `raw_ptr` must be a valid `AVFrame` pointer or null.
+    unsafe fn calculate_adjusted_pointers(
+        raw_ptr: *const sys::AVFrame,
+        offset: usize,
+        in_sample_fmt: sys::AVSampleFormat,
+        in_channels: usize,
+        scratch: &mut Vec<*const u8>,
+    ) -> *const *const u8 {
+        if raw_ptr.is_null() {
+            return ptr::null();
+        }
+
+        unsafe {
+            let original_data = (*raw_ptr).extended_data as *const *const u8;
+            if offset == 0 {
+                return original_data;
+            }
+
+            let bytes_per_sample = sys::av_get_bytes_per_sample(in_sample_fmt) as usize;
+            let is_in_planar = sys::av_sample_fmt_is_planar(in_sample_fmt) == 1;
+
+            scratch.clear();
+
+            if is_in_planar {
+                for ch in 0..in_channels {
+                    let orig_ptr = *original_data.add(ch);
+                    let new_ptr = orig_ptr.add(offset * bytes_per_sample);
+                    scratch.push(new_ptr);
+                }
+            } else {
+                let orig_ptr = *original_data;
+                let new_ptr = orig_ptr.add(offset * in_channels * bytes_per_sample);
+                scratch.push(new_ptr);
+            }
+
+            scratch.as_ptr()
         }
     }
 
@@ -336,5 +441,71 @@ impl RawAudioBuffer {
     ///    previously reserved capacity.
     pub const unsafe fn as_typed_slice<T: AudioSample>(&self, element_count: usize) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.inner.as_ptr().cast::<T>(), element_count) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem;
+
+    use super::*;
+
+    /// 验证偏移指针算术运算的正确性 (Planar 格式)
+    #[test]
+    fn test_pointer_arithmetic_planar() {
+        unsafe {
+            let ch0_data = [0u8; 100];
+            let ch1_data = [1u8; 100];
+
+            let mut data_ptrs: [*mut u8; 8] = [ptr::null_mut(); 8];
+            data_ptrs[0] = ch0_data.as_ptr().cast_mut();
+            data_ptrs[1] = ch1_data.as_ptr().cast_mut();
+
+            let mut raw_frame = mem::zeroed::<sys::AVFrame>();
+            raw_frame.extended_data = data_ptrs.as_mut_ptr();
+
+            let mut scratch = Vec::with_capacity(2);
+            let offset_samples = 10;
+
+            let adjusted_ptrs = Resampler::calculate_adjusted_pointers(
+                &raw const raw_frame,
+                offset_samples,
+                sys::AVSampleFormat_AV_SAMPLE_FMT_FLTP,
+                2,
+                &mut scratch,
+            );
+
+            let ptrs_slice = std::slice::from_raw_parts(adjusted_ptrs, 2);
+
+            assert_eq!(ptrs_slice[0], ch0_data.as_ptr().add(40));
+            assert_eq!(ptrs_slice[1], ch1_data.as_ptr().add(40));
+        }
+    }
+
+    /// 验证偏移指针算术运算的正确性 (Packed 格式)
+    #[test]
+    fn test_pointer_arithmetic_packed() {
+        unsafe {
+            let packed_data = [0u8; 200];
+            let mut data_ptrs: [*mut u8; 8] = [ptr::null_mut(); 8];
+            data_ptrs[0] = packed_data.as_ptr().cast_mut();
+
+            let mut raw_frame = mem::zeroed::<sys::AVFrame>();
+            raw_frame.extended_data = data_ptrs.as_mut_ptr();
+
+            let mut scratch = Vec::with_capacity(1);
+            let offset_samples = 10;
+
+            let adjusted_ptrs = Resampler::calculate_adjusted_pointers(
+                &raw const raw_frame,
+                offset_samples,
+                sys::AVSampleFormat_AV_SAMPLE_FMT_S16,
+                2,
+                &mut scratch,
+            );
+
+            let ptrs_slice = std::slice::from_raw_parts(adjusted_ptrs, 1);
+            assert_eq!(ptrs_slice[0], packed_data.as_ptr().add(40));
+        }
     }
 }

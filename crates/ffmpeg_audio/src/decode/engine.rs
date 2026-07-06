@@ -13,7 +13,10 @@ use crate::{
     Demuxer,
     Result,
     TimeBase,
-    decode::io::IoContext,
+    decode::{
+        SeekMode,
+        io::IoContext,
+    },
     sys,
 };
 
@@ -60,6 +63,8 @@ pub struct DecodeEngine {
     /// Indicates whether a valid frame was decoded and buffered during a seek operation,
     /// waiting to be consumed by the next read invocation.
     has_buffered_seek_frame: bool,
+    /// Stores the calculated sample offset for the buffered seek frame
+    buffered_seek_offset: usize,
 }
 
 impl DecodeEngine {
@@ -92,6 +97,7 @@ impl DecodeEngine {
             current_pts: None,
             is_exhausted: false,
             has_buffered_seek_frame: false,
+            buffered_seek_offset: 0,
         })
     }
 
@@ -124,7 +130,10 @@ impl DecodeEngine {
         if self.has_buffered_seek_frame {
             self.has_buffered_seek_frame = false;
             let frame_ptr = self.decoder.current_frame();
-            let audio_frame = AudioFrame::new(frame_ptr, self.time_base);
+            let audio_frame =
+                AudioFrame::new(frame_ptr, self.time_base).with_offset(self.buffered_seek_offset);
+
+            self.buffered_seek_offset = 0;
             self.current_pts = audio_frame.pts();
 
             self.debug_verify();
@@ -162,7 +171,7 @@ impl DecodeEngine {
     /// # Errors
     /// Returns an `AudioError` if the underlying demuxer fails to seek, or if a decoding
     /// error occurs during the frame alignment process.
-    pub fn seek(&mut self, target: Duration) -> Result<()> {
+    pub fn seek(&mut self, target: Duration, mode: SeekMode) -> Result<()> {
         self.debug_verify();
 
         self.demuxer.seek_to(target)?;
@@ -171,36 +180,46 @@ impl DecodeEngine {
         self.is_exhausted = false;
         self.current_pts = None;
         self.has_buffered_seek_frame = false;
+        self.buffered_seek_offset = 0;
+
+        if mode == SeekMode::Coarse {
+            self.debug_verify();
+            return Ok(());
+        }
 
         let target_us = target.as_micros() as i64;
-        let sample_rate = f64::from(self.decoder.sample_rate());
 
-        // Decode and discard frames until reaching the target
-        // Prevents ffmpeg from jumping to the keyframe preceding the target position,
-        // avoiding playback lag.
         loop {
             match self.receive_frame() {
                 Ok(Some(frame)) => {
                     if let Some(pts) = frame.pts() {
                         let pts_us = pts.as_micros() as i64;
+                        let sample_rate = f64::from(frame.frame_sample_rate());
                         let duration_us = if sample_rate > 0.0 {
                             (frame.samples() as f64 / sample_rate * 1_000_000.0) as i64
                         } else {
                             0
                         };
 
-                        // If the end time of the current frame surpasses the target timestamp,
-                        // this frame contains or immediately follows the exact target playback position
                         if pts_us + duration_us >= target_us {
-                            // Buffer this frame so it can be immediately consumed by the next
-                            // external call to `receive_frame`
+                            let delta_us = target_us.saturating_sub(pts_us).max(0);
+                            let offset_samples = if sample_rate > 0.0 {
+                                ((delta_us as f64 * sample_rate) / 1_000_000.0).round() as usize
+                            } else {
+                                0
+                            };
+
+                            if offset_samples >= frame.samples() {
+                                continue;
+                            }
+
                             self.has_buffered_seek_frame = true;
+                            self.buffered_seek_offset = offset_samples;
                             break;
                         }
                     } else {
-                        // If a frame lacks a valid PTS, stop discarding immediately
-                        // to prevent accidentally consuming and exhausting the entire stream.
                         self.has_buffered_seek_frame = true;
+                        self.buffered_seek_offset = 0;
                         break;
                     }
                 }
@@ -209,10 +228,7 @@ impl DecodeEngine {
             }
         }
 
-        // Eliminate the PTS update side effects resulting from calling `receive_frame` within
-        // the decoding loop
         self.current_pts = None;
-
         self.debug_verify();
         Ok(())
     }
@@ -233,13 +249,15 @@ impl DecodeEngine {
     pub fn scan_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
         let original_position = if self.has_buffered_seek_frame {
             let frame_ptr = self.decoder.current_frame();
-            AudioFrame::new(frame_ptr, self.time_base).pts()
+            AudioFrame::new(frame_ptr, self.time_base)
+                .with_offset(self.buffered_seek_offset)
+                .pts()
         } else {
             self.current_pts
         }
         .unwrap_or(Duration::ZERO);
 
-        self.seek(Duration::ZERO)?;
+        self.seek(Duration::ZERO, SeekMode::Coarse)?;
 
         let mut max_pts_us: Option<i64> = None;
         let mut last_frame_duration_us: i64 = 0;
@@ -271,33 +289,30 @@ impl DecodeEngine {
                     }
                 }
             },
-            ScanMode::Frame => {
-                let sample_rate = f64::from(self.decoder.sample_rate());
-                loop {
-                    match self.receive_frame() {
-                        Ok(Some(frame)) => {
-                            let samples = frame.samples();
-                            total_samples_fallback += samples;
-                            if let Some(pts) = frame.pts() {
-                                max_pts_us =
-                                    Some(max_pts_us.unwrap_or(0).max(pts.as_micros() as i64));
-                            }
-                            if sample_rate > 0.0 {
-                                let duration_secs = samples as f64 / sample_rate;
-                                last_frame_duration_us = (duration_secs * 1_000_000.0) as i64;
-                            }
+            ScanMode::Frame => loop {
+                match self.receive_frame() {
+                    Ok(Some(frame)) => {
+                        let samples = frame.samples();
+                        total_samples_fallback += samples;
+                        if let Some(pts) = frame.pts() {
+                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(pts.as_micros() as i64));
                         }
-                        Ok(None) => break,
-                        Err(e) => {
-                            scan_error = Some(e);
-                            break;
+                        let sample_rate = f64::from(frame.frame_sample_rate());
+                        if sample_rate > 0.0 {
+                            let duration_secs = samples as f64 / sample_rate;
+                            last_frame_duration_us = (duration_secs * 1_000_000.0) as i64;
                         }
                     }
+                    Ok(None) => break,
+                    Err(e) => {
+                        scan_error = Some(e);
+                        break;
+                    }
                 }
-            }
+            },
         }
 
-        self.seek(original_position)?;
+        self.seek(original_position, SeekMode::Accurate)?;
 
         if let Some(e) = scan_error {
             return Err(e);
@@ -335,12 +350,7 @@ impl DecodeEngine {
     /// # Returns
     /// * `Some(Duration)` representing the current playback position.
     /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
-    pub fn stream_position(&self) -> Option<Duration> {
-        if self.has_buffered_seek_frame {
-            let frame_ptr = self.decoder.current_frame();
-            AudioFrame::new(frame_ptr, self.time_base).pts()
-        } else {
-            self.current_pts
-        }
+    pub const fn stream_position(&self) -> Option<Duration> {
+        self.current_pts
     }
 }
