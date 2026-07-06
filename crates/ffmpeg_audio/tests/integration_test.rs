@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::Cursor,
     time::Duration,
 };
@@ -9,9 +8,6 @@ use ffmpeg_audio::{
     ResampleOptions,
     SeekMode,
 };
-
-const AAC_SEEK_PATH: &str = "tests/assets/seek_test.aac";
-const MUTATION_AAC_PATH: &str = "tests/assets/format_mutation.aac";
 
 fn generate_sine_wav(duration_secs: f32) -> Vec<u8> {
     let sample_rate: u32 = 44100;
@@ -398,72 +394,80 @@ fn test_planar_format_mismatch_rejection_planar_to_packed() {
     );
 }
 
-#[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn test_seek_accuracy() {
-    let file = File::open(AAC_SEEK_PATH).expect("Failed to open AAC test asset");
-    let mut reader = AudioReader::new(file).unwrap();
+mod file_tests {
+    use std::fs::File;
 
-    let target = Duration::from_millis(501);
+    use super::*;
 
-    reader.seek(target, SeekMode::Coarse).unwrap();
-    let (coarse_pts, coarse_samples) = {
-        let frame = reader.receive_frame().unwrap().unwrap();
-        (frame.pts().unwrap(), frame.samples())
-    };
+    const AAC_SEEK_PATH: &str = "tests/assets/seek_test.aac";
+    const MUTATION_AAC_PATH: &str = "tests/assets/format_mutation.aac";
 
-    assert!(coarse_pts < target, "Coarse seek PTS should be < target");
+    #[test]
+    fn test_seek_accuracy() {
+        let file = File::open(AAC_SEEK_PATH).expect("Failed to open AAC test asset");
+        let mut reader = AudioReader::new(file).unwrap();
 
-    reader.seek(target, SeekMode::Accurate).unwrap();
-    let (accurate_pts, accurate_samples) = {
-        let frame = reader.receive_frame().unwrap().unwrap();
-        (frame.pts().unwrap(), frame.samples())
-    };
+        let target = Duration::from_millis(501);
 
-    assert_eq!(
-        accurate_pts.as_millis(),
-        target.as_millis(),
-        "Accurate seek PTS must exactly match the target"
-    );
+        reader.seek(target, SeekMode::Coarse).unwrap();
+        let (coarse_pts, coarse_samples) = {
+            let frame = reader.receive_frame().unwrap().unwrap();
+            (frame.pts().unwrap(), frame.samples())
+        };
 
-    assert!(
-        accurate_samples < coarse_samples,
-        "Accurate frame should be trimmed ({accurate_samples} < {coarse_samples})"
-    );
-}
+        assert!(coarse_pts < target, "Coarse seek PTS should be < target");
 
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn test_hot_reload_on_format_mutation() {
-    let file = File::open(MUTATION_AAC_PATH).unwrap();
-    let reader = AudioReader::new(file).unwrap();
+        reader.seek(target, SeekMode::Accurate).unwrap();
+        let (accurate_pts, accurate_samples) = {
+            let frame = reader.receive_frame().unwrap().unwrap();
+            (frame.pts().unwrap(), frame.samples())
+        };
 
-    let options = ResampleOptions::new()
-        .format::<f32>()
-        .channels(2)
-        .sample_rate(48000);
+        assert_eq!(
+            accurate_pts.as_millis(),
+            target.as_millis(),
+            "Accurate seek PTS must exactly match the target"
+        );
 
-    let mut resampled_reader = reader.into_resampled(options).unwrap();
-
-    let mut total_samples = 0;
-
-    loop {
-        match resampled_reader.receive_frame_as::<f32>() {
-            Ok(Some(samples)) => {
-                assert_eq!(
-                    samples.len() % 2,
-                    0,
-                    "Output slice must be interleaved stereo"
-                );
-                total_samples += samples.len() / 2;
-            }
-            Ok(None) => break,
-            Err(e) => panic!("Failed to receive frame: {e:?}"),
-        }
+        assert!(
+            accurate_samples < coarse_samples,
+            "Accurate frame should be trimmed ({accurate_samples} < {coarse_samples})"
+        );
     }
 
-    assert!(
-        total_samples > 0,
-        "Should have successfully decoded mutated stream"
-    );
+    #[test]
+    fn test_hot_reload_on_format_mutation() {
+        let file = File::open(MUTATION_AAC_PATH).unwrap();
+        let reader = AudioReader::new(file).unwrap();
+
+        let options = ResampleOptions::new()
+            .format::<f32>()
+            .channels(2)
+            .sample_rate(48000);
+
+        let mut resampled_reader = reader.into_resampled(options).unwrap();
+
+        let mut total_samples = 0;
+
+        loop {
+            match resampled_reader.receive_frame_as::<f32>() {
+                Ok(Some(samples)) => {
+                    assert_eq!(
+                        samples.len() % 2,
+                        0,
+                        "Output slice must be interleaved stereo"
+                    );
+                    total_samples += samples.len() / 2;
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Failed to receive frame: {e:?}"),
+            }
+        }
+
+        assert!(
+            total_samples > 0,
+            "Should have successfully decoded mutated stream"
+        );
+    }
 }
