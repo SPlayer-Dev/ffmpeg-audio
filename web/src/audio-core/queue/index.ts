@@ -91,13 +91,6 @@ export interface AudioWriter {
  */
 export interface AudioReader {
 	/**
-	 * Reads audio frames from the buffer into the provided output arrays.
-	 * Automatically outputs silence if playback is paused, seeking, or if underflow occurs.
-	 * @param outputs A 2D array representing the destination channels.
-	 * @param outLen The number of frames requested by the audio context.
-	 */
-	read(outputs: Float32Array[][], outLen: number): void;
-	/**
 	 * Returns true if the playback state is currently set to playing.
 	 */
 	isPlaying(): boolean;
@@ -276,52 +269,6 @@ class AudioQueueCore implements MainAudioController, AudioWriter, AudioReader {
 	//#endregion
 
 	//#region AudioReader
-	read(outputs: Float32Array[][], outLen: number): void {
-		const isPlaying = Atomics.load(this.controlBlock, STATE_PLAYING) === 1;
-		const isSeeking = Atomics.load(this.controlBlock, STATE_IS_SEEKING) === 1;
-
-		if (!isPlaying || isSeeking) {
-			this.fillSilence(outputs);
-			return;
-		}
-
-		const writeIndex = Atomics.load(this.controlBlock, STATE_WRITE_INDEX);
-		const readIndex = Atomics.load(this.controlBlock, STATE_READ_INDEX);
-		const availableData = writeIndex - readIndex;
-
-		if (availableData < outLen) {
-			this.fillSilence(outputs);
-			return;
-		}
-
-		const ringPos = readIndex % RING_BUFFER_CAPACITY;
-		const spaceToEnd = RING_BUFFER_CAPACITY - ringPos;
-		const output = outputs[0];
-
-		for (let c = 0; c < this.channels; c++) {
-			if (!output[c]) continue;
-
-			if (outLen <= spaceToEnd) {
-				output[c].set(
-					this.channelBuffers[c].subarray(ringPos, ringPos + outLen),
-				);
-			} else {
-				output[c].set(
-					this.channelBuffers[c].subarray(ringPos, RING_BUFFER_CAPACITY),
-					0,
-				);
-				const remaining = outLen - spaceToEnd;
-				output[c].set(
-					this.channelBuffers[c].subarray(0, remaining),
-					spaceToEnd,
-				);
-			}
-		}
-
-		Atomics.add(this.controlBlock, STATE_READ_INDEX, outLen);
-		Atomics.notify(this.controlBlock, STATE_READ_INDEX, 1);
-	}
-
 	isPlaying(): boolean {
 		return Atomics.load(this.controlBlock, STATE_PLAYING) === 1;
 	}
@@ -388,17 +335,6 @@ class AudioQueueCore implements MainAudioController, AudioWriter, AudioReader {
 		Atomics.store(this.controlBlock, STATE_PLAYING, 0);
 	}
 	//#endregion
-
-	private fillSilence(outputs: Float32Array[][]): void {
-		const output = outputs[0];
-		if (!output) return;
-
-		for (let c = 0; c < this.channels; c++) {
-			if (output[c]) {
-				output[c].fill(0);
-			}
-		}
-	}
 }
 //#endregion
 

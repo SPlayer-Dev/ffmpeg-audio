@@ -40,6 +40,7 @@ fn main() {
     let runtime_json = serde_json::to_string(&runtime_methods).unwrap();
 
     let link_args = [
+        "-sEXPORT_NAME=FFmpegAudio".into(),
         format!("--js-library={js_library}"),
         "-sALLOW_MEMORY_GROWTH=1".into(),
         format!("-sEXPORTED_FUNCTIONS={exports_json}"),
@@ -49,7 +50,9 @@ fn main() {
         "-sNO_EXIT_RUNTIME=1".into(),
         "-O3".into(),
         "-g1".into(),
-        "-closure=0".into(),
+        "-flto=full".into(),
+        "-sFILESYSTEM=0".into(),
+        "-sINCOMING_MODULE_JS_API=['locateFile', 'js_get_file_size', 'js_read_file']".into(),
     ];
 
     for arg in &link_args {
