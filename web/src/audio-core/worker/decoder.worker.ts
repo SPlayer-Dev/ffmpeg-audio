@@ -17,6 +17,8 @@ const yieldChannel = new MessageChannel();
 let isProcessing = false;
 let currentSeekGeneration = 0;
 
+const WORKER_MIN_SPACE_REQ_FRAMES = 8192;
+
 yieldChannel.port1.onmessage = () => {
 	processFrame();
 };
@@ -58,49 +60,57 @@ async function processFrame() {
 	const myGeneration = currentSeekGeneration;
 
 	try {
-		const status = wasmModule._wasm_decoder_decode_frame(decoderPtr);
+		const { async, promise } = audioWriter.waitForSpaceAsync(
+			WORKER_MIN_SPACE_REQ_FRAMES,
+		);
 
-		if (status === 1) {
-			const samples = wasmModule._wasm_decoder_get_frame_samples(decoderPtr);
-			const memoryBuffer = wasmModule.wasmMemory.buffer;
+		if (async && promise) {
+			await promise;
+		} else {
+			const status = wasmModule._wasm_decoder_decode_frame(decoderPtr);
 
-			const channelDatas: Float32Array[] = [];
-			for (let c = 0; c < targetChannels; c++) {
-				const ptr = wasmModule._wasm_decoder_get_channel_ptr(decoderPtr, c);
-				channelDatas.push(new Float32Array(memoryBuffer, ptr, samples));
-			}
+			if (status === 1) {
+				const samples = wasmModule._wasm_decoder_get_frame_samples(decoderPtr);
+				const memoryBuffer = wasmModule.wasmMemory.buffer;
 
-			let written = 0;
-			while (written < samples) {
-				if (!isDecoding || myGeneration !== currentSeekGeneration) {
-					return;
+				const channelDatas: Float32Array[] = [];
+				for (let c = 0; c < targetChannels; c++) {
+					const ptr = wasmModule._wasm_decoder_get_channel_ptr(decoderPtr, c);
+					channelDatas.push(new Float32Array(memoryBuffer, ptr, samples));
 				}
 
-				const remaining = samples - written;
-				const pushed = audioWriter.writePartial(
-					channelDatas,
-					written,
-					remaining,
-				);
-				written += pushed;
+				let written = 0;
+				while (written < samples) {
+					if (!isDecoding || myGeneration !== currentSeekGeneration) {
+						return;
+					}
 
-				if (pushed === 0) {
-					const { async, promise } = audioWriter.waitForSpaceAsync();
-					if (async && promise) {
-						await promise;
+					const remaining = samples - written;
+					const pushed = audioWriter.writePartial(
+						channelDatas,
+						written,
+						remaining,
+					);
+					written += pushed;
+
+					if (pushed === 0) {
+						const { async, promise } = audioWriter.waitForSpaceAsync(1);
+						if (async && promise) {
+							await promise;
+						}
 					}
 				}
+			} else if (status === 0) {
+				isDecoding = false;
+				eofPending = true;
+				checkEofDrained();
+				return;
+			} else {
+				console.error("Decoder: Fatal decoding error.");
+				isDecoding = false;
+				self.postMessage({ type: "DECODE_ERROR" });
+				return;
 			}
-		} else if (status === 0) {
-			isDecoding = false;
-			eofPending = true;
-			checkEofDrained();
-			return;
-		} else {
-			console.error("Decoder: Fatal decoding error.");
-			isDecoding = false;
-			self.postMessage({ type: "DECODE_ERROR" });
-			return;
 		}
 	} finally {
 		isProcessing = false;
@@ -110,7 +120,7 @@ async function processFrame() {
 		}
 	}
 
-	if (isDecoding) {
+	if (isDecoding && myGeneration === currentSeekGeneration) {
 		yieldChannel.port2.postMessage(null);
 	}
 }
