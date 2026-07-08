@@ -2,7 +2,10 @@ import { type AudioWriter, createAudioWriter } from "../queue";
 import type { FFmpegWasmModule, FFmpegWasmModuleFactory } from "./types.ts";
 import createModule from "./wasm/ffmpeg_wasm.js";
 
+const THRESHOLD_50MB = 50 * 1024 * 1024;
+
 let wasmModule: FFmpegWasmModule | null = null;
+let audioData: Uint8Array | null = null;
 let audioFile: File | null = null;
 const readerSync = new FileReaderSync();
 
@@ -28,22 +31,40 @@ async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
 		locateFile: () => ffmpegWasmUrl,
 
 		js_get_file_size: (_file_id: number): number => {
-			return audioFile ? audioFile.size : -1;
+			return audioData ? audioData.byteLength : audioFile ? audioFile.size : -1;
 		},
 
 		js_read_file: (
 			_file_id: number,
 			offset: number,
 			length: number,
-		): ArrayBuffer | null => {
-			if (!audioFile) return null;
-			try {
-				const blobSlice = audioFile.slice(offset, offset + length);
-				return readerSync.readAsArrayBuffer(blobSlice);
-			} catch (err) {
-				console.error("read error:", err);
-				return null;
+			buffer_ptr: number,
+		): number => {
+			if (!wasmModule) return -1;
+
+			if (audioData) {
+				const maxRead = Math.min(length, audioData.byteLength - offset);
+				if (maxRead <= 0) return 0;
+
+				const slice = audioData.subarray(offset, offset + maxRead);
+				wasmModule.HEAPU8.set(slice, buffer_ptr);
+				return maxRead;
 			}
+
+			if (audioFile) {
+				try {
+					const blobSlice = audioFile.slice(offset, offset + length);
+					const buffer = readerSync.readAsArrayBuffer(blobSlice);
+					const u8 = new Uint8Array(buffer);
+					wasmModule.HEAPU8.set(u8, buffer_ptr);
+					return u8.length;
+				} catch (err) {
+					console.error("Chunk read error:", err);
+					return -1;
+				}
+			}
+
+			return -1;
 		},
 	});
 }
@@ -148,7 +169,15 @@ self.onmessage = async (e: MessageEvent) => {
 
 	if (type === "INIT") {
 		try {
-			audioFile = payload.file;
+			if (payload.file.size < THRESHOLD_50MB) {
+				const arrayBuffer = await payload.file.arrayBuffer();
+				audioData = new Uint8Array(arrayBuffer);
+				audioFile = null;
+			} else {
+				audioFile = payload.file;
+				audioData = null;
+			}
+
 			targetSampleRate = payload.sampleRate;
 			targetChannels = payload.channels;
 			audioWriter = createAudioWriter(payload.sharedBuffer);

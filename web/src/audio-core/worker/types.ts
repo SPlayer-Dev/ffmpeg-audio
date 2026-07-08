@@ -5,11 +5,33 @@ export interface FFmpegWasmConfig {
 		file_id: number,
 		offset: number,
 		length: number,
-	) => ArrayBuffer | null;
+		buffer_ptr: number,
+	) => number;
 }
 
 export interface FFmpegWasmModule {
 	wasmMemory: WebAssembly.Memory;
+
+	HEAP8: Int8Array;
+	HEAPU8: Uint8Array;
+	HEAP16: Int16Array;
+	HEAPU16: Uint16Array;
+	HEAP32: Int32Array;
+	HEAPU32: Uint32Array;
+	HEAPF32: Float32Array;
+	HEAPF64: Float64Array;
+	HEAP64: BigInt64Array;
+	HEAPU64: BigUint64Array;
+
+	getValue(
+		ptr: number,
+		type?: "i1" | "i8" | "i16" | "i32" | "i64" | "float" | "double" | "*",
+	): number | bigint;
+	setValue(
+		ptr: number,
+		value: number | bigint,
+		type?: "i1" | "i8" | "i16" | "i32" | "i64" | "float" | "double" | "*",
+	): void;
 
 	_wasm_decoder_create(
 		mode: number,

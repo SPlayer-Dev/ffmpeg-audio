@@ -5,6 +5,7 @@ use std::{
         CString,
         c_char,
     },
+    io::BufReader,
     ptr,
     time::Duration,
 };
@@ -45,7 +46,9 @@ pub unsafe extern "C" fn wasm_decoder_create(
         }
     };
 
-    let reader = match AudioReader::new(file_access) {
+    let buffered_access = BufReader::with_capacity(1024 * 1024, file_access);
+
+    let reader = match AudioReader::new(buffered_access) {
         Ok(r) => r,
         Err(e) => {
             println!("[ffmpeg_wasm] AudioReader::new Error: {e:?}");
