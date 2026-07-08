@@ -3,7 +3,6 @@ import { type AudioReader, createAudioReader } from "../queue";
 import initWasm, { SoundTouchProcessor } from "./wasm/soundtouch.js";
 
 const WORKLET_BLOCK_SIZE = 128;
-const INPUT_CHUNK_SIZE = 2048;
 
 class FFmpegAudioProcessor extends AudioWorkletProcessor {
 	private audioReader: AudioReader | null = null;
@@ -14,8 +13,8 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 	private currentTempo: number = 1.0;
 	private currentRate: number = 1.0;
 	private playbackFractional: number = 0.0;
-
 	private lastSeekGeneration: number = 0;
+	private inputChunkSize: number = 0;
 
 	constructor() {
 		super();
@@ -26,11 +25,12 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 			if (type === "INIT") {
 				const { sharedBuffer, channels, wasmBytes, initId } = payload;
 				this.channels = channels;
-				this.audioReader = createAudioReader(sharedBuffer, channels);
+				this.audioReader = createAudioReader(sharedBuffer);
 
 				const wasmInstance = await initWasm({ module_or_path: wasmBytes });
 				this.wasmMemory = wasmInstance.memory;
 				this.stProcessor = new SoundTouchProcessor(channels, sampleRate);
+				this.inputChunkSize = this.stProcessor.getInputChunkSize();
 
 				this.port.postMessage({
 					type: "INIT_DONE",
@@ -67,8 +67,10 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 			!this.audioReader ||
 			!this.stProcessor ||
 			!this.wasmMemory ||
+			this.inputChunkSize === 0 ||
 			!output[0]
 		) {
+			this.fillSilence(output, WORKLET_BLOCK_SIZE);
 			return true;
 		}
 
@@ -110,7 +112,7 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 				break;
 			}
 
-			const readAmount = Math.min(availableInSAB, INPUT_CHUNK_SIZE);
+			const readAmount = Math.min(availableInSAB, this.inputChunkSize);
 
 			const wasmInputs: Float32Array[] = [];
 			for (let c = 0; c < this.channels; c++) {

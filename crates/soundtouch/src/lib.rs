@@ -1,13 +1,14 @@
 use soundtouch_rs::SoundTouch;
 use wasm_bindgen::prelude::*;
 
-const INPUT_CHUNK_SIZE: usize = 2048;
 const OUTPUT_CHUNK_SIZE: usize = 128;
+const INPUT_CHUNK_DURATION_RATIO: f64 = 0.04266;
 
 #[wasm_bindgen]
 pub struct SoundTouchProcessor {
     st: SoundTouch,
     channels: usize,
+    input_chunk_size: usize,
 
     input_buffers: Vec<Vec<f32>>,
     output_buffers: Vec<Vec<f32>>,
@@ -21,15 +22,22 @@ impl SoundTouchProcessor {
             .build()
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let input_buffers = vec![vec![0.0; INPUT_CHUNK_SIZE]; channels];
+        let input_chunk_size = (sample_rate as f64 * INPUT_CHUNK_DURATION_RATIO).ceil() as usize;
+        let input_buffers = vec![vec![0.0; input_chunk_size]; channels];
         let output_buffers = vec![vec![0.0; OUTPUT_CHUNK_SIZE]; channels];
 
         Ok(Self {
             st,
             channels,
+            input_chunk_size,
             input_buffers,
             output_buffers,
         })
+    }
+
+    #[wasm_bindgen(js_name = getInputChunkSize)]
+    pub fn get_input_chunk_size(&self) -> usize {
+        self.input_chunk_size
     }
 
     #[wasm_bindgen(js_name = getInputPtr)]
@@ -56,7 +64,7 @@ impl SoundTouchProcessor {
             return Ok(());
         }
 
-        let valid_samples = num_samples.min(INPUT_CHUNK_SIZE);
+        let valid_samples = num_samples.min(self.input_chunk_size);
 
         let input_slices: Vec<&[f32]> = self
             .input_buffers

@@ -10,13 +10,22 @@ import type {
 	EngineEventMap,
 	EngineState,
 	PlayerCover,
+	QueueConfig,
 } from "./types.ts";
 import { TypedEventTarget } from "./utils";
 
 const TIMEUPDATE_INTERVAL_MS = 250;
 
+const DEFAULT_QUEUE_CONFIG: Required<QueueConfig> = {
+	capacitySeconds: 4.0,
+	notifyWatermarkSeconds: 1.0,
+	emergencyWatermarkSeconds: 0.4,
+};
+
 export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	private config: EngineConfig;
+	private queueConfig: Required<QueueConfig>;
+	private loadSessionId = 0;
 	private renderer: AudioRenderer;
 	private workerClient: DecoderWorkerClient;
 	private audioController: MainAudioController | null = null;
@@ -41,6 +50,11 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	constructor(config: EngineConfig) {
 		super();
 		this.config = config;
+
+		this.queueConfig = {
+			...DEFAULT_QUEUE_CONFIG,
+			...config.queueConfig,
+		};
 
 		this.renderer = new AudioRenderer(
 			config.audioContext,
@@ -196,23 +210,34 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	 * Loads a file, prepares the multithreading environment, and extracts metadata.
 	 */
 	public async loadFile(file: File): Promise<void> {
-		if (this._state === "loading") return;
+		const currentSessionId = ++this.loadSessionId;
+		this.destroy();
 
 		this._state = "loading";
-		this.resetState();
-		this.stopTimeupdate();
 
 		const channels = this.renderer.maxChannels;
 		const sampleRate = this.renderer.sampleRate;
 
 		await this.renderer.initialize(channels);
 
-		if (!this.sharedBuffer) {
-			this.sharedBuffer = allocateAudioQueueMemory(channels);
+		if (this.loadSessionId !== currentSessionId) {
+			return;
 		}
-		this.audioController = createMainController(this.sharedBuffer, channels);
+
+		this.sharedBuffer = allocateAudioQueueMemory(
+			sampleRate,
+			channels,
+			this.queueConfig,
+		);
+
+		this.audioController = createMainController(this.sharedBuffer);
 
 		await this.renderer.bindQueue(this.sharedBuffer, channels);
+
+		if (this.loadSessionId !== currentSessionId) {
+			return;
+		}
+
 		const loadPromise = new Promise<void>((resolve) => {
 			this.loadResolve = resolve;
 		});

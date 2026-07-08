@@ -151,7 +151,7 @@ self.onmessage = async (e: MessageEvent) => {
 			audioFile = payload.file;
 			targetSampleRate = payload.sampleRate;
 			targetChannels = payload.channels;
-			audioWriter = createAudioWriter(payload.sharedBuffer, targetChannels);
+			audioWriter = createAudioWriter(payload.sharedBuffer);
 			wasmModule = await initWasm(payload.ffmpegWasmUrl);
 
 			decoderPtr = wasmModule._wasm_decoder_create(

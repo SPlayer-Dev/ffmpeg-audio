@@ -1,4 +1,16 @@
 /**
+ * Queue memory allocation and buffer watermark configuration (based on seconds)
+ */
+export interface QueueConfig {
+	/** Total capacity of the circular buffer (seconds) */
+	capacitySeconds: number;
+	/** Notification watermark to trigger decoder wakeup (seconds) */
+	notifyWatermarkSeconds: number;
+	/** Emergency watermark; decoder wakes up immediately and unconditionally if below this value (seconds) */
+	emergencyWatermarkSeconds: number;
+}
+
+/**
  * Configuration required to initialize the audio engine.
  */
 export interface EngineConfig {
@@ -21,6 +33,8 @@ export interface EngineConfig {
 		ffmpegWasmUrl: string;
 		soundtouchWasmUrl: string;
 	};
+
+	queueConfig?: Partial<QueueConfig>;
 }
 
 /**
