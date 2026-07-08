@@ -38,3 +38,7 @@ rustflags = [
     "-C",
     "target-feature=+mutable-globals",
 ]
+
+[unstable]
+build-std = ["core", "alloc", "std", "panic_abort", "proc_macro"]
+panic-immediate-abort = true
