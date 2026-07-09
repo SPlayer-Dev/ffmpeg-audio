@@ -58,10 +58,10 @@ fn main() {
         "-sMODULARIZE=1".into(),
         "-sNO_EXIT_RUNTIME=1".into(),
         "-O3".into(),
-        "-g1".into(),
+        "-g2".into(),
         "-flto=full".into(),
         "-sFILESYSTEM=0".into(),
-        "-sINCOMING_MODULE_JS_API=['locateFile', 'js_get_file_size', 'js_read_file']".into(),
+        "-sINCOMING_MODULE_JS_API=['locateFile']".into(),
     ];
 
     for arg in &link_args {
