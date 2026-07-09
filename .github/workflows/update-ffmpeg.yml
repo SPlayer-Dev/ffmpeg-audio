@@ -45,10 +45,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          deno-version: v2.x
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Emscripten SDK
         if: matrix.os == 'emscripten'
@@ -77,7 +84,7 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: |
           cd ffmpeg
-          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
+          node generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -103,10 +110,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          deno-version: v2.x
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Clone FFmpeg
         run: |
@@ -116,7 +130,7 @@ jobs:
       - name: Run Configuration Script
         run: |
           cd ffmpeg
-          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
+          node generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -145,10 +159,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          deno-version: v2.x
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Setup MSVC Compiler
         uses: apoint123/msvc-dev-cmd@v1
@@ -172,7 +193,7 @@ jobs:
           git clone --depth 1 --branch n8.1.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
           cp scripts/generate_config.ts ffmpeg/
           cd ffmpeg
-          deno run -A generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
+          node generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -189,10 +210,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          deno-version: v2.x
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Download all platform artifacts
         uses: actions/download-artifact@v7
@@ -215,7 +243,7 @@ jobs:
 
       - name: Generate ffmpeg_slim and pack zips
         run: |
-          deno run -A scripts/extract_slim.ts
+          node scripts/extract_slim.ts
 
       - name: Show zip sizes
         run: |

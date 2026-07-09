@@ -179,14 +179,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: deno task lint
+        run: pnpm run lint
 
       - name: Check formatting
-        run: deno task format:check
+        run: pnpm run format:check
 
       - name: Type check
-        run: deno task check
+        run: pnpm run typecheck

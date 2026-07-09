@@ -1,8 +1,8 @@
-export { FFmpegAudioEngine } from "./engine.ts";
+export { FFmpegAudioEngine } from "./engine";
 export type {
 	EngineConfig,
 	EngineError,
 	EngineEventMap,
 	EngineState,
 	PlayerCover,
-} from "./types.ts";
+} from "./types";

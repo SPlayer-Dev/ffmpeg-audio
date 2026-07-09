@@ -1,12 +1,14 @@
-import { join } from "@std/path";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-const args = Deno.args;
+const args = process.argv.slice(2);
 if (args.length < 2) {
 	console.error("错误: 缺少参数");
 	console.error(
-		"用法: deno run -A generate_config.ts <windows|linux|android|macos|ios|emscripten> <x86_64|x86|aarch64|arm|armeabi-v7a|arm64-v8a|arm64|wasm32>",
+		"用法: node generate_config.ts <windows|linux|android|macos|ios|emscripten> <x86_64|x86|aarch64|arm|armeabi-v7a|arm64-v8a|arm64|wasm32>",
 	);
-	Deno.exit(1);
+	process.exit(1);
 }
 
 const targetOs = args[0];
@@ -163,7 +165,7 @@ if (targetOs === "windows") {
 		targetArch = "arm64";
 	} else {
 		console.error(`不支持的 Windows 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 	options.push("--extra-cflags=-DHAVE_UNISTD_H=0");
 } else if (targetOs === "windows-gnu") {
@@ -181,7 +183,7 @@ if (targetOs === "windows") {
 		targetArch = "arm";
 	} else {
 		console.error(`不支持的 Windows GNU 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else if (targetOs === "linux") {
 	options.push("--target-os=linux");
@@ -208,16 +210,16 @@ if (targetOs === "windows") {
 		options.push(`--arch=${targetArch}`);
 	} else {
 		console.error(`不支持的 Linux 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else if (targetOs === "android") {
 	options.push("--target-os=android", "--enable-cross-compile");
 
 	const ndkPath =
-		Deno.env.get("ANDROID_NDK_LATEST_HOME") || Deno.env.get("ANDROID_NDK_HOME");
+		process.env.ANDROID_NDK_LATEST_HOME || process.env.ANDROID_NDK_HOME;
 	if (!ndkPath) {
 		console.error("错误: 找不到环境变量 ANDROID_NDK_HOME");
-		Deno.exit(1);
+		process.exit(1);
 	}
 
 	const toolchain = `${ndkPath}/toolchains/llvm/prebuilt/linux-x86_64/bin`;
@@ -241,7 +243,7 @@ if (targetOs === "windows") {
 		targetArch = "x86_64";
 	} else {
 		console.error(`不支持的 Android 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else if (targetOs === "macos") {
 	options.push("--target-os=darwin");
@@ -254,22 +256,23 @@ if (targetOs === "windows") {
 		targetArch = "arm64";
 	} else {
 		console.error(`不支持的 macOS 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else if (targetOs === "ios") {
 	options.push("--target-os=darwin", "--enable-cross-compile");
 	if (targetArch === "arm64" || targetArch === "aarch64") {
 		options.push("--arch=aarch64", "--cc=clang");
 
-		const xcrunCmd = new Deno.Command("xcrun", {
-			args: ["--sdk", "iphoneos", "--show-sdk-path"],
-		});
-		const { stdout, success } = xcrunCmd.outputSync();
-		if (!success) {
+		const xcrunResult = spawnSync("xcrun", [
+			"--sdk",
+			"iphoneos",
+			"--show-sdk-path",
+		]);
+		if (!xcrunResult.status || xcrunResult.status !== 0) {
 			console.error("错误: 无法获取 iOS SDK 路径");
-			Deno.exit(1);
+			process.exit(1);
 		}
-		const sysroot = new TextDecoder().decode(stdout).trim();
+		const sysroot = xcrunResult.stdout.toString().trim();
 
 		options.push(`--extra-cflags=-isysroot ${sysroot}`);
 		options.push("--extra-cflags=-target aarch64-apple-ios12.0");
@@ -280,7 +283,7 @@ if (targetOs === "windows") {
 		targetArch = "arm64";
 	} else {
 		console.error(`不支持的 iOS 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else if (targetOs === "emscripten") {
 	options.push("--target-os=none", "--enable-cross-compile");
@@ -303,53 +306,54 @@ if (targetOs === "windows") {
 		options.push("--extra-cflags=-msimd128");
 	} else {
 		console.error(`不支持的 Emscripten 架构: ${targetArch}`);
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else {
 	console.error(`不支持的 OS: ${targetOs}`);
-	Deno.exit(1);
+	process.exit(1);
 }
 
 const buildDir = `build_out_${targetOs}_${targetArch}`;
-Deno.mkdirSync(buildDir, { recursive: true });
+mkdirSync(buildDir, { recursive: true });
 const safeOptions = options.map((opt) => `'${opt}'`).join(" ");
 
 console.log("运行 Configure 命令:");
 console.log(`../configure ${safeOptions}`);
 
-const configureCmd = new Deno.Command("bash", {
-	args: ["-c", `../configure ${safeOptions}`],
-	cwd: buildDir,
-	stdout: "inherit",
-	stderr: "inherit",
-});
+const configureResult = spawnSync(
+	"bash",
+	["-c", `../configure ${safeOptions}`],
+	{
+		cwd: buildDir,
+		stdio: "inherit",
+	},
+);
 
-const configureStatus = await configureCmd.spawn().status;
-
-if (configureStatus.success) {
+if (configureResult.status === 0) {
 	console.log("Configure 成功，生成编译日志...");
 
-	const makeCmd = new Deno.Command("bash", {
-		args: ["-c", "make V=1 -n > make_dryrun.log"],
-		cwd: buildDir,
-		stdout: "inherit",
-		stderr: "inherit",
-	});
+	const makeResult = spawnSync(
+		"bash",
+		["-c", "make V=1 -n > make_dryrun.log"],
+		{
+			cwd: buildDir,
+			stdio: "inherit",
+		},
+	);
 
-	const makeStatus = await makeCmd.spawn().status;
-	if (makeStatus.success) {
+	if (makeResult.status === 0) {
 		console.log(`配置已输出至 : ${buildDir}/config.h`);
 		console.log(`编译日志输出至: ${buildDir}/make_dryrun.log`);
 	} else {
 		console.error("生成编译日志 (make V=1 -n) 失败！");
-		Deno.exit(1);
+		process.exit(1);
 	}
 } else {
 	console.error("Configure 失败！请检查 ffbuild/config.log 报错");
 
 	const configLogPath = join(buildDir, "ffbuild", "config.log");
 	try {
-		const configLog = Deno.readTextFileSync(configLogPath);
+		const configLog = readFileSync(configLogPath, "utf-8");
 		const lines = configLog.split("\n");
 		console.log("-------------------------------------------------");
 		console.log(lines.slice(-500).join("\n"));
@@ -358,5 +362,5 @@ if (configureStatus.success) {
 		console.error("未找到 ffbuild/config.log，无法打印错误信息");
 	}
 
-	Deno.exit(1);
+	process.exit(1);
 }
