@@ -1,5 +1,6 @@
 import "./polyfill.ts";
 import { type AudioReader, createAudioReader } from "../queue";
+import type { WorkletCommand, WorkletEvent } from "./types";
 import initWasm, { SoundTouchProcessor } from "./wasm/soundtouch";
 
 const WORKLET_BLOCK_SIZE = 128;
@@ -19,11 +20,11 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 	constructor() {
 		super();
 
-		this.port.addEventListener("message", async (event) => {
-			const { type, payload } = event.data;
+		this.port.onmessage = async (event: MessageEvent<WorkletCommand>) => {
+			const data = event.data;
 
-			if (type === "INIT") {
-				const { sharedBuffer, channels, wasmBytes, initId } = payload;
+			if (data.type === "INIT") {
+				const { sharedBuffer, channels, wasmBytes, initId } = data.payload;
 				this.channels = channels;
 				this.audioReader = createAudioReader(sharedBuffer);
 
@@ -32,19 +33,19 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 				this.stProcessor = new SoundTouchProcessor(channels, sampleRate);
 				this.inputChunkSize = this.stProcessor.getInputChunkSize();
 
-				this.port.postMessage({
+				this.postEvent({
 					type: "INIT_DONE",
 					payload: { initId },
 				});
-			} else if (type === "SET_TEMPO" && this.stProcessor) {
-				this.stProcessor.setTempo(payload.tempo);
-				this.currentTempo = payload.tempo;
-			} else if (type === "SET_PITCH" && this.stProcessor) {
-				this.stProcessor.setPitch(payload.pitch);
-			} else if (type === "SET_RATE" && this.stProcessor) {
-				this.stProcessor.setRate(payload.rate);
-				this.currentRate = payload.rate;
-			} else if (type === "DESTROY") {
+			} else if (data.type === "SET_TEMPO" && this.stProcessor) {
+				this.stProcessor.setTempo(data.payload.tempo);
+				this.currentTempo = data.payload.tempo;
+			} else if (data.type === "SET_PITCH" && this.stProcessor) {
+				this.stProcessor.setPitch(data.payload.pitch);
+			} else if (data.type === "SET_RATE" && this.stProcessor) {
+				this.stProcessor.setRate(data.payload.rate);
+				this.currentRate = data.payload.rate;
+			} else if (data.type === "DESTROY") {
 				if (this.stProcessor) {
 					this.stProcessor.free();
 					this.stProcessor = null;
@@ -52,9 +53,13 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 				this.wasmMemory = null;
 				this.audioReader = null;
 			}
-		});
+		};
 
 		this.port.start();
+	}
+
+	private postEvent(event: WorkletEvent): void {
+		this.port.postMessage(event);
 	}
 
 	process(
@@ -101,7 +106,7 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 				this.fillSilence(output, WORKLET_BLOCK_SIZE);
 				this.audioReader.clearPauseAtIndex();
 				this.audioReader.pausePlayback();
-				this.port.postMessage({ type: "AUTO_PAUSED" });
+				this.postEvent({ type: "AUTO_PAUSED" });
 				return true;
 			}
 		}
@@ -182,7 +187,7 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 		if (isHittingTarget) {
 			this.audioReader.clearPauseAtIndex();
 			this.audioReader.pausePlayback();
-			this.port.postMessage({ type: "AUTO_PAUSED" });
+			this.postEvent({ type: "AUTO_PAUSED" });
 		}
 
 		return true;

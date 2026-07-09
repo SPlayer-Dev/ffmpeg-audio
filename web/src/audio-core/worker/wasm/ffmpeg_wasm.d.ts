@@ -1,4 +1,4 @@
-import type { FFmpegAudioConfig, FFmpegAudioModule } from "../types.ts";
+import type { FFmpegAudioConfig, FFmpegAudioModule } from "../types";
 
 declare function createFFmpegAudio(
 	config: FFmpegAudioConfig,

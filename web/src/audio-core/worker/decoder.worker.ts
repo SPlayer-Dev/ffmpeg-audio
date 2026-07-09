@@ -1,6 +1,6 @@
 import { type AudioWriter, createAudioWriter } from "../queue";
-import type { FFmpegAudioModule } from "./types.ts";
-import createFFmpegAudio from "./wasm/ffmpeg_wasm.js";
+import type { FFmpegAudioModule, WorkerCommand, WorkerEvent } from "./types";
+import createFFmpegAudio from "./wasm/ffmpeg_wasm";
 
 const THRESHOLD_50MB = 50 * 1024 * 1024;
 
@@ -25,6 +25,10 @@ const WORKER_MIN_SPACE_REQ_FRAMES = 8192;
 yieldChannel.port1.onmessage = () => {
 	processFrame();
 };
+
+function postEvent(event: WorkerEvent): void {
+	self.postMessage(event);
+}
 
 async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegAudioModule> {
 	return await createFFmpegAudio({
@@ -130,7 +134,7 @@ async function processFrame() {
 			} else {
 				console.error("Decoder: Fatal decoding error.");
 				isDecoding = false;
-				self.postMessage({ type: "DECODE_ERROR" });
+				postEvent({ type: "DECODE_ERROR" });
 				return;
 			}
 		}
@@ -154,7 +158,7 @@ function checkEofDrained() {
 
 	if (isDrained) {
 		eofPending = false;
-		self.postMessage({ type: "DECODE_EOF" });
+		postEvent({ type: "DECODE_EOF" });
 		return;
 	}
 
@@ -165,11 +169,12 @@ function checkEofDrained() {
 	}
 }
 
-self.onmessage = async (e: MessageEvent) => {
-	const { type, payload } = e.data;
+self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
+	const data = e.data;
 
-	if (type === "INIT") {
+	if (data.type === "INIT") {
 		try {
+			const payload = data.payload;
 			if (payload.file.size < THRESHOLD_50MB) {
 				const arrayBuffer = await payload.file.arrayBuffer();
 				audioData = new Uint8Array(arrayBuffer);
@@ -210,28 +215,28 @@ self.onmessage = async (e: MessageEvent) => {
 				if (mimePtr !== 0) coverMime = ffmpegModule.UTF8ToString(mimePtr);
 			}
 
-			self.postMessage({
+			postEvent({
 				type: "INIT_DONE",
 				payload: { duration, metadata, coverBytes, coverMime },
 			});
 		} catch (err) {
 			console.error("Worker Init Failed:", err);
-			self.postMessage({ type: "INIT_ERROR", error: String(err) });
+			postEvent({ type: "INIT_ERROR", error: String(err) });
 		}
-	} else if (type === "PLAY") {
+	} else if (data.type === "PLAY") {
 		if (!isDecoding) {
 			isDecoding = true;
 			processFrame();
 		}
-	} else if (type === "PAUSE") {
+	} else if (data.type === "PAUSE") {
 		isDecoding = false;
-	} else if (type === "SEEK") {
+	} else if (data.type === "SEEK") {
 		if (!ffmpegModule || !audioWriter) return;
 		eofPending = false;
 		currentSeekGeneration++;
 
 		audioWriter.beginSeek();
-		ffmpegModule._wasm_decoder_seek(decoderPtr, payload.targetSeconds);
+		ffmpegModule._wasm_decoder_seek(decoderPtr, data.payload.targetSeconds);
 		audioWriter.endSeek();
 
 		if (!isDecoding) {

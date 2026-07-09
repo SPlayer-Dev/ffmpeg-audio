@@ -1,3 +1,5 @@
+import type { WorkerCommand, WorkerEvent } from "../worker/types";
+
 export interface WorkerClientCallbacks {
 	onInitDone: (payload: {
 		duration: number;
@@ -27,27 +29,31 @@ export class DecoderWorkerClient {
 		this.destroy();
 
 		this.worker = new Worker(this.workerUrl, { type: "module" });
-		this.worker.onmessage = this.handleMessage.bind(this);
+
+		this.worker.onmessage = (e: MessageEvent<WorkerEvent>) => {
+			this.handleMessage(e);
+		};
+
 		this.worker.onerror = (e) => {
 			this.callbacks.onError(4, `Worker error: ${e.message}`);
 		};
 
-		this.worker.postMessage({
+		this.postCommand({
 			type: "INIT",
 			payload: { file, sampleRate, channels, sharedBuffer, ffmpegWasmUrl },
 		});
 	}
 
 	public play(): void {
-		this.worker?.postMessage({ type: "PLAY" });
+		this.postCommand({ type: "PLAY" });
 	}
 
 	public pause(): void {
-		this.worker?.postMessage({ type: "PAUSE" });
+		this.postCommand({ type: "PAUSE" });
 	}
 
 	public seek(targetSeconds: number): void {
-		this.worker?.postMessage({
+		this.postCommand({
 			type: "SEEK",
 			payload: { targetSeconds },
 		});
@@ -60,12 +66,12 @@ export class DecoderWorkerClient {
 		}
 	}
 
-	private handleMessage(e: MessageEvent): void {
-		const { type, payload } = e.data;
+	private handleMessage(e: MessageEvent<WorkerEvent>): void {
+		const data = e.data;
 
-		switch (type) {
+		switch (data.type) {
 			case "INIT_DONE":
-				this.callbacks.onInitDone(payload);
+				this.callbacks.onInitDone(data.payload);
 				break;
 			case "DECODE_EOF":
 				this.callbacks.onEnded();
@@ -74,8 +80,15 @@ export class DecoderWorkerClient {
 				this.callbacks.onError(2, "Fatal decoding error");
 				break;
 			case "INIT_ERROR":
-				this.callbacks.onError(3, payload?.error ?? "Initialization failed");
+				this.callbacks.onError(3, data.error ?? "Initialization failed");
 				break;
 		}
+	}
+
+	/**
+	 * Private helper to enforce typing on outgoing messages to the Decoder Worker
+	 */
+	private postCommand(cmd: WorkerCommand): void {
+		this.worker?.postMessage(cmd);
 	}
 }

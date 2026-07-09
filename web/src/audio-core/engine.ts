@@ -63,8 +63,8 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 			config.gainNode,
 		);
 
-		this.renderer.onMessage = (type) => {
-			if (type === "AUTO_PAUSED") {
+		this.renderer.onMessage = (event) => {
+			if (event.type === "AUTO_PAUSED") {
 				this.handleAutoPaused();
 			}
 		};

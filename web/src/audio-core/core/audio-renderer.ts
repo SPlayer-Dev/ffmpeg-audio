@@ -1,3 +1,5 @@
+import type { WorkletCommand, WorkletEvent } from "../worklet/types";
+
 export class AudioRenderer {
 	private initCounter = 0;
 
@@ -16,7 +18,7 @@ export class AudioRenderer {
 		this.gainNode = gainNode || null;
 	}
 
-	public onMessage?: (type: string, payload?: unknown) => void;
+	public onMessage?: (event: WorkletEvent) => void;
 
 	/**
 	 * Returns true if the AudioWorklet has been completely loaded.
@@ -65,19 +67,27 @@ export class AudioRenderer {
 				return reject(new Error("Worklet not loaded"));
 			}
 
-			const currentInitId = ++this.initCounter;
-			this.workletNode.port.onmessage = (event: MessageEvent) => {
-				const { type, payload } = event.data;
+			if (!this.stWasmBytes) {
+				return reject(new Error("SoundTouch Wasm binary not loaded"));
+			}
 
-				if (type === "INIT_DONE" && payload?.initId === currentInitId) {
+			const currentInitId = ++this.initCounter;
+			this.workletNode.port.onmessage = (event: MessageEvent<WorkletEvent>) => {
+				const data = event.data;
+
+				if (
+					data.type === "INIT_DONE" &&
+					data.payload.initId === currentInitId
+				) {
 					resolve();
 				} else {
-					this.onMessage?.(type, payload);
+					this.onMessage?.(data);
 				}
 			};
 
 			this.workletNode.port.start();
-			this.workletNode.port.postMessage({
+
+			this.postCommand({
 				type: "INIT",
 				payload: {
 					sharedBuffer,
@@ -90,24 +100,15 @@ export class AudioRenderer {
 	}
 
 	public setTempo(tempo: number): void {
-		this.workletNode?.port.postMessage({
-			type: "SET_TEMPO",
-			payload: { tempo },
-		});
+		this.postCommand({ type: "SET_TEMPO", payload: { tempo } });
 	}
 
 	public setPitch(pitch: number): void {
-		this.workletNode?.port.postMessage({
-			type: "SET_PITCH",
-			payload: { pitch },
-		});
+		this.postCommand({ type: "SET_PITCH", payload: { pitch } });
 	}
 
 	public setRate(rate: number): void {
-		this.workletNode?.port.postMessage({
-			type: "SET_RATE",
-			payload: { rate },
-		});
+		this.postCommand({ type: "SET_RATE", payload: { rate } });
 	}
 
 	/**
@@ -140,9 +141,16 @@ export class AudioRenderer {
 	 */
 	public destroyNode(): void {
 		if (this.workletNode) {
-			this.workletNode.port.postMessage({ type: "DESTROY" });
+			this.postCommand({ type: "DESTROY" });
 			this.workletNode.disconnect();
 			this.workletNode = null;
 		}
+	}
+
+	/**
+	 * Private helper to enforce typing on outgoing messages to the Worklet
+	 */
+	private postCommand(cmd: WorkletCommand): void {
+		this.workletNode?.port.postMessage(cmd);
 	}
 }
