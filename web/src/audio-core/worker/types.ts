@@ -1,4 +1,4 @@
-export interface FFmpegWasmConfig {
+export interface FFmpegAudioConfig {
 	locateFile: (path: string, scriptDirectory: string) => string;
 	js_get_file_size: (file_id: number) => number;
 	js_read_file: (
@@ -9,7 +9,7 @@ export interface FFmpegWasmConfig {
 	) => number;
 }
 
-export interface FFmpegWasmModule {
+export interface FFmpegAudioModule {
 	wasmMemory: WebAssembly.Memory;
 
 	HEAP8: Int8Array;
@@ -63,7 +63,3 @@ export interface FFmpegWasmModule {
 		ignoreNul?: boolean,
 	): string;
 }
-
-export type FFmpegWasmModuleFactory = (
-	config: FFmpegWasmConfig,
-) => Promise<FFmpegWasmModule>;

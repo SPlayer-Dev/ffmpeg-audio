@@ -1,6 +1,6 @@
 import "./polyfill.ts";
 import { type AudioReader, createAudioReader } from "../queue";
-import initWasm, { SoundTouchProcessor } from "./wasm/soundtouch.js";
+import initWasm, { SoundTouchProcessor } from "./wasm/soundtouch";
 
 const WORKLET_BLOCK_SIZE = 128;
 

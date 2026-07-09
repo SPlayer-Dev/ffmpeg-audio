@@ -49,13 +49,11 @@ fn main() {
     let runtime_json = serde_json::to_string(&runtime_methods).unwrap();
 
     let link_args = [
-        "-sEXPORT_NAME=FFmpegAudio".into(),
+        "-sEXPORT_NAME=createFFmpegAudio".into(),
         format!("--js-library={js_library}"),
         "-sALLOW_MEMORY_GROWTH=1".into(),
         format!("-sEXPORTED_FUNCTIONS={exports_json}"),
         format!("-sEXPORTED_RUNTIME_METHODS={runtime_json}"),
-        "-sEXPORT_ES6=1".into(),
-        "-sMODULARIZE=1".into(),
         "-sNO_EXIT_RUNTIME=1".into(),
         "-O3".into(),
         "-g2".into(),

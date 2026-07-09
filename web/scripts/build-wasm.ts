@@ -59,12 +59,7 @@ if (!existsSync(stOutDir)) {
 	mkdirSync(stOutDir, { recursive: true });
 }
 
-const stFiles = [
-	".gitignore",
-	"soundtouch.js",
-	"soundtouch_bg.wasm",
-	"soundtouch.d.ts",
-];
+const stFiles = ["soundtouch.js", "soundtouch_bg.wasm", "soundtouch.d.ts"];
 const stPkgDir = resolve(stCrateDir, "pkg");
 
 for (const file of stFiles) {

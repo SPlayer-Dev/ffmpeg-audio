@@ -1,10 +1,10 @@
 import { type AudioWriter, createAudioWriter } from "../queue";
-import type { FFmpegWasmModule, FFmpegWasmModuleFactory } from "./types.ts";
-import createModule from "./wasm/ffmpeg_wasm.js";
+import type { FFmpegAudioModule } from "./types.ts";
+import createFFmpegAudio from "./wasm/ffmpeg_wasm.js";
 
 const THRESHOLD_50MB = 50 * 1024 * 1024;
 
-let wasmModule: FFmpegWasmModule | null = null;
+let ffmpegModule: FFmpegAudioModule | null = null;
 let audioData: Uint8Array | null = null;
 let audioFile: File | null = null;
 const readerSync = new FileReaderSync();
@@ -26,8 +26,8 @@ yieldChannel.port1.onmessage = () => {
 	processFrame();
 };
 
-async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
-	return await (createModule as unknown as FFmpegWasmModuleFactory)({
+async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegAudioModule> {
+	return await createFFmpegAudio({
 		locateFile: () => ffmpegWasmUrl,
 
 		js_get_file_size: (_file_id: number): number => {
@@ -40,14 +40,14 @@ async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
 			length: number,
 			buffer_ptr: number,
 		): number => {
-			if (!wasmModule) return -1;
+			if (!ffmpegModule) return -1;
 
 			if (audioData) {
 				const maxRead = Math.min(length, audioData.byteLength - offset);
 				if (maxRead <= 0) return 0;
 
 				const slice = audioData.subarray(offset, offset + maxRead);
-				wasmModule.HEAPU8.set(slice, buffer_ptr);
+				ffmpegModule.HEAPU8.set(slice, buffer_ptr);
 				return maxRead;
 			}
 
@@ -56,7 +56,7 @@ async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
 					const blobSlice = audioFile.slice(offset, offset + length);
 					const buffer = readerSync.readAsArrayBuffer(blobSlice);
 					const u8 = new Uint8Array(buffer);
-					wasmModule.HEAPU8.set(u8, buffer_ptr);
+					ffmpegModule.HEAPU8.set(u8, buffer_ptr);
 					return u8.length;
 				} catch (err) {
 					console.error("Chunk read error:", err);
@@ -70,7 +70,7 @@ async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegWasmModule> {
 }
 
 async function processFrame() {
-	if (!wasmModule || !isDecoding || decoderPtr === 0 || !audioWriter) {
+	if (!ffmpegModule || !isDecoding || decoderPtr === 0 || !audioWriter) {
 		return;
 	}
 
@@ -88,15 +88,16 @@ async function processFrame() {
 		if (async && promise) {
 			await promise;
 		} else {
-			const status = wasmModule._wasm_decoder_decode_frame(decoderPtr);
+			const status = ffmpegModule._wasm_decoder_decode_frame(decoderPtr);
 
 			if (status === 1) {
-				const samples = wasmModule._wasm_decoder_get_frame_samples(decoderPtr);
-				const memoryBuffer = wasmModule.wasmMemory.buffer;
+				const samples =
+					ffmpegModule._wasm_decoder_get_frame_samples(decoderPtr);
+				const memoryBuffer = ffmpegModule.wasmMemory.buffer;
 
 				const channelDatas: Float32Array[] = [];
 				for (let c = 0; c < targetChannels; c++) {
-					const ptr = wasmModule._wasm_decoder_get_channel_ptr(decoderPtr, c);
+					const ptr = ffmpegModule._wasm_decoder_get_channel_ptr(decoderPtr, c);
 					channelDatas.push(new Float32Array(memoryBuffer, ptr, samples));
 				}
 
@@ -181,9 +182,9 @@ self.onmessage = async (e: MessageEvent) => {
 			targetSampleRate = payload.sampleRate;
 			targetChannels = payload.channels;
 			audioWriter = createAudioWriter(payload.sharedBuffer);
-			wasmModule = await initWasm(payload.ffmpegWasmUrl);
+			ffmpegModule = await initWasm(payload.ffmpegWasmUrl);
 
-			decoderPtr = wasmModule._wasm_decoder_create(
+			decoderPtr = ffmpegModule._wasm_decoder_create(
 				1,
 				targetSampleRate,
 				targetChannels,
@@ -191,22 +192,22 @@ self.onmessage = async (e: MessageEvent) => {
 			if (decoderPtr === 0)
 				throw new Error("Failed to create Wasm Decoder Context");
 
-			const duration = wasmModule._wasm_decoder_get_duration(decoderPtr);
+			const duration = ffmpegModule._wasm_decoder_get_duration(decoderPtr);
 			const metadataJsonPtr =
-				wasmModule._wasm_decoder_get_metadata_json(decoderPtr);
-			const metadataJson = wasmModule.UTF8ToString(metadataJsonPtr);
+				ffmpegModule._wasm_decoder_get_metadata_json(decoderPtr);
+			const metadataJson = ffmpegModule.UTF8ToString(metadataJsonPtr);
 			const metadata = JSON.parse(metadataJson);
 
 			let coverBytes: ArrayBuffer | null = null;
 			let coverMime: string | null = null;
-			const coverSize = wasmModule._wasm_decoder_get_cover_size(decoderPtr);
+			const coverSize = ffmpegModule._wasm_decoder_get_cover_size(decoderPtr);
 
 			if (coverSize > 0) {
-				const coverPtr = wasmModule._wasm_decoder_get_cover_ptr(decoderPtr);
-				const memoryBuffer = wasmModule.wasmMemory.buffer;
+				const coverPtr = ffmpegModule._wasm_decoder_get_cover_ptr(decoderPtr);
+				const memoryBuffer = ffmpegModule.wasmMemory.buffer;
 				coverBytes = memoryBuffer.slice(coverPtr, coverPtr + coverSize);
-				const mimePtr = wasmModule._wasm_decoder_get_cover_mime(decoderPtr);
-				if (mimePtr !== 0) coverMime = wasmModule.UTF8ToString(mimePtr);
+				const mimePtr = ffmpegModule._wasm_decoder_get_cover_mime(decoderPtr);
+				if (mimePtr !== 0) coverMime = ffmpegModule.UTF8ToString(mimePtr);
 			}
 
 			self.postMessage({
@@ -225,12 +226,12 @@ self.onmessage = async (e: MessageEvent) => {
 	} else if (type === "PAUSE") {
 		isDecoding = false;
 	} else if (type === "SEEK") {
-		if (!wasmModule || !audioWriter) return;
+		if (!ffmpegModule || !audioWriter) return;
 		eofPending = false;
 		currentSeekGeneration++;
 
 		audioWriter.beginSeek();
-		wasmModule._wasm_decoder_seek(decoderPtr, payload.targetSeconds);
+		ffmpegModule._wasm_decoder_seek(decoderPtr, payload.targetSeconds);
 		audioWriter.endSeek();
 
 		if (!isDecoding) {
