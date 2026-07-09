@@ -30,6 +30,15 @@ function postEvent(event: WorkerEvent): void {
 	self.postMessage(event);
 }
 
+function getLastErrorMsg(): string {
+	if (!ffmpegModule) return "Wasm module not loaded";
+
+	const err = ffmpegModule.UTF8ToString(ffmpegModule._wasm_get_last_error());
+
+	if (!err) return "Unknown FFmpeg error";
+	return err;
+}
+
 async function initWasm(ffmpegWasmUrl: string): Promise<FFmpegAudioModule> {
 	return await createFFmpegAudio({
 		locateFile: () => ffmpegWasmUrl,
@@ -132,9 +141,10 @@ async function processFrame() {
 				checkEofDrained();
 				return;
 			} else {
-				console.error("Decoder: Fatal decoding error.");
 				isDecoding = false;
-				postEvent({ type: "DECODE_ERROR" });
+				const rawErr = getLastErrorMsg();
+				console.error(`Decoder error during frame processing: ${rawErr}`);
+				postEvent({ type: "DECODE_ERROR", error: `Decode failed: ${rawErr}` });
 				return;
 			}
 		}
@@ -194,8 +204,12 @@ self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
 				targetSampleRate,
 				targetChannels,
 			);
-			if (decoderPtr === 0)
-				throw new Error("Failed to create Wasm Decoder Context");
+
+			if (decoderPtr === 0) {
+				throw new Error(
+					`Decoder Context creation failed: ${getLastErrorMsg()}`,
+				);
+			}
 
 			const duration = ffmpegModule._wasm_decoder_get_duration(decoderPtr);
 			const metadataJsonPtr =
@@ -236,8 +250,20 @@ self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
 		currentSeekGeneration++;
 
 		audioWriter.beginSeek();
-		ffmpegModule._wasm_decoder_seek(decoderPtr, data.payload.targetSeconds);
+		const seekStatus = ffmpegModule._wasm_decoder_seek(
+			decoderPtr,
+			data.payload.targetSeconds,
+		);
 		audioWriter.endSeek();
+
+		if (seekStatus === -1) {
+			postEvent({
+				type: "DECODE_ERROR",
+				error: `Seek failed at ${data.payload.targetSeconds}s: ${getLastErrorMsg()}`,
+			});
+			isDecoding = false;
+			return;
+		}
 
 		if (!isDecoding) {
 			isDecoding = true;

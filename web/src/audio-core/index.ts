@@ -1,8 +1,2 @@
 export { FFmpegAudioEngine } from "./engine";
-export type {
-	EngineConfig,
-	EngineError,
-	EngineEventMap,
-	EngineState,
-	PlayerCover,
-} from "./types";
+export type * from "./types";

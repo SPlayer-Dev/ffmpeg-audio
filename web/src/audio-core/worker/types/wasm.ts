@@ -49,13 +49,15 @@ export interface FFmpegAudioModule {
 		channelIndex: number,
 	): number;
 	_wasm_decoder_get_duration(decoderPtr: number): number;
-	_wasm_decoder_seek(decoderPtr: number, targetSeconds: number): void;
+	_wasm_decoder_seek(decoderPtr: number, targetSeconds: number): number;
 	_wasm_decoder_get_metadata_json(decoderPtr: number): number;
 	_wasm_decoder_get_cover_ptr(decoderPtr: number): number;
 	_wasm_decoder_get_cover_size(decoderPtr: number): number;
 	_wasm_decoder_get_cover_mime(decoderPtr: number): number;
 
 	_wasm_decoder_set_compute_peaks(decoderPtr: number, enable: number): number;
+
+	_wasm_get_last_error(): number;
 
 	UTF8ToString(
 		ptr: number,

@@ -24,5 +24,5 @@ export type WorkerEvent =
 			};
 	  }
 	| { type: "DECODE_EOF" }
-	| { type: "DECODE_ERROR" }
+	| { type: "DECODE_ERROR"; error: string }
 	| { type: "INIT_ERROR"; error: string };

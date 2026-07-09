@@ -1,3 +1,4 @@
+import { EngineErrorCode, type EngineErrorCodeValue } from "../types";
 import type { WorkerCommand, WorkerEvent } from "../worker/types";
 
 export interface WorkerClientCallbacks {
@@ -8,7 +9,7 @@ export interface WorkerClientCallbacks {
 		coverMime: string | null;
 	}) => void;
 	onEnded: () => void;
-	onError: (code: number, message: string) => void;
+	onError: (code: EngineErrorCodeValue, message: string) => void;
 }
 
 export class DecoderWorkerClient {
@@ -35,7 +36,10 @@ export class DecoderWorkerClient {
 		};
 
 		this.worker.onerror = (e) => {
-			this.callbacks.onError(4, `Worker error: ${e.message}`);
+			this.callbacks.onError(
+				EngineErrorCode.SrcNotSupported,
+				`Worker error: ${e.message}`,
+			);
 		};
 
 		this.postCommand({
@@ -77,10 +81,10 @@ export class DecoderWorkerClient {
 				this.callbacks.onEnded();
 				break;
 			case "DECODE_ERROR":
-				this.callbacks.onError(2, "Fatal decoding error");
+				this.callbacks.onError(EngineErrorCode.Decode, data.error);
 				break;
 			case "INIT_ERROR":
-				this.callbacks.onError(3, data.error ?? "Initialization failed");
+				this.callbacks.onError(EngineErrorCode.SrcNotSupported, data.error);
 				break;
 		}
 	}

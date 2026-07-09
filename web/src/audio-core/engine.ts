@@ -7,6 +7,7 @@ import {
 import type {
 	EngineConfig,
 	EngineError,
+	EngineErrorCodeValue,
 	EngineEventMap,
 	EngineState,
 	PlayerCover,
@@ -331,7 +332,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.dispatch("ended");
 	}
 
-	private handleError(code: number, message: string): void {
+	private handleError(code: EngineErrorCodeValue, message: string): void {
 		this._error = { code, message };
 		this.stopTimeupdate();
 		this._state = "idle";

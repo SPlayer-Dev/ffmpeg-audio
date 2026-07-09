@@ -1,6 +1,7 @@
 mod io;
 
 use std::{
+    cell::RefCell,
     ffi::{
         CString,
         c_char,
@@ -11,12 +12,24 @@ use std::{
 };
 
 use ffmpeg_audio::{
+    AudioError,
     AudioReader,
     ResampleOptions,
     ResampledReader,
+    Result,
     SeekMode,
 };
 use io::JsFileAccess;
+
+thread_local! {
+    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::new("").unwrap());
+}
+
+fn set_last_error(err: &AudioError) {
+    LAST_ERROR.with(|prev| {
+        *prev.borrow_mut() = CString::new(err.to_string()).unwrap_or_default();
+    });
+}
 
 pub struct DecoderContext {
     reader: ResampledReader,
@@ -38,63 +51,13 @@ pub unsafe extern "C" fn wasm_decoder_create(
     target_sample_rate: i32,
     target_channels: i32,
 ) -> *mut DecoderContext {
-    let file_access = match JsFileAccess::new(file_id) {
-        Ok(acc) => acc,
+    match inner::decoder_create(file_id, target_sample_rate, target_channels) {
+        Ok(ptr) => ptr,
         Err(e) => {
-            println!("[ffmpeg_wasm] JsFileAccess Error: {e:?}");
-            return ptr::null_mut();
+            set_last_error(&e);
+            ptr::null_mut()
         }
-    };
-
-    let buffered_access = BufReader::with_capacity(1024 * 1024, file_access);
-
-    let reader = match AudioReader::new(buffered_access) {
-        Ok(r) => r,
-        Err(e) => {
-            println!("[ffmpeg_wasm] AudioReader::new Error: {e:?}");
-            return ptr::null_mut();
-        }
-    };
-
-    let metadata_map = reader.metadata();
-    let metadata_json = match serde_json::to_string(&metadata_map) {
-        Ok(json) => CString::new(json).unwrap_or_default(),
-        Err(e) => {
-            println!("[ffmpeg_wasm] Metadata JSON Error: {e:?}");
-            CString::default()
-        }
-    };
-
-    let cover = reader.cover();
-    let cover_data = cover.as_ref().map_or_else(Vec::new, |c| c.data.clone());
-    let cover_mime = cover
-        .and_then(|c| c.mime_type)
-        .and_then(|m| CString::new(m).ok());
-
-    let options = ResampleOptions::new()
-        .sample_rate(target_sample_rate)
-        .channels(target_channels)
-        .format_planar::<f32>();
-    let resampled_reader = match reader.into_resampled(options) {
-        Ok(rr) => rr,
-        Err(e) => {
-            println!("[ffmpeg_wasm] Resampler Error: {e:?}");
-            return ptr::null_mut();
-        }
-    };
-
-    let ctx = Box::new(DecoderContext {
-        reader: resampled_reader,
-        current_samples: 0,
-        current_ptrs: Vec::with_capacity(target_channels as usize),
-        metadata_json,
-        cover_data,
-        cover_mime,
-        compute_peaks: false,
-        frame_min: 0.0,
-        frame_max: 0.0,
-    });
-    Box::into_raw(ctx)
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -109,45 +72,26 @@ pub unsafe extern "C" fn wasm_decoder_destroy(ctx_ptr: *mut DecoderContext) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasm_decoder_decode_frame(ctx_ptr: *mut DecoderContext) -> i32 {
     let ctx = unsafe { &mut *ctx_ptr };
+    match inner::decoder_decode_frame(ctx) {
+        Ok(code) => code,
+        Err(e) => {
+            set_last_error(&e);
+            -1
+        }
+    }
+}
 
-    loop {
-        match ctx.reader.receive_planar_as::<f32>() {
-            Ok(Some(channels_data)) => {
-                if channels_data.is_empty() {
-                    continue;
-                }
-
-                let len = channels_data[0].len();
-                if len == 0 {
-                    continue;
-                }
-
-                ctx.current_samples = len;
-                ctx.current_ptrs = channels_data.iter().map(|slice| slice.as_ptr()).collect();
-
-                if ctx.compute_peaks {
-                    let ch0 = channels_data[0];
-                    let (mut min_val, mut max_val) = (ch0[0], ch0[0]);
-
-                    for &val in ch0 {
-                        if val < min_val {
-                            min_val = val;
-                        }
-                        if val > max_val {
-                            max_val = val;
-                        }
-                    }
-                    ctx.frame_min = min_val;
-                    ctx.frame_max = max_val;
-                } else {
-                    ctx.frame_min = 0.0;
-                    ctx.frame_max = 0.0;
-                }
-
-                return 1;
-            }
-            Ok(None) => return 0,
-            Err(_) => return -1,
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasm_decoder_seek(
+    ctx_ptr: *mut DecoderContext,
+    target_seconds: f64,
+) -> i32 {
+    let ctx = unsafe { &mut *ctx_ptr };
+    match inner::decoder_seek(ctx, target_seconds) {
+        Ok(code) => code,
+        Err(e) => {
+            set_last_error(&e);
+            -1
         }
     }
 }
@@ -187,27 +131,6 @@ pub unsafe extern "C" fn wasm_decoder_get_channel_ptr(
         ctx.current_ptrs[ch]
     } else {
         ptr::null()
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn wasm_decoder_seek(
-    ctx_ptr: *mut DecoderContext,
-    target_seconds: f64,
-) -> i32 {
-    if target_seconds < 0.0 {
-        return -1;
-    }
-
-    let ctx = unsafe { &mut *ctx_ptr };
-    let duration = Duration::from_secs_f64(target_seconds);
-
-    if ctx.reader.seek(duration, SeekMode::Accurate).is_ok() {
-        ctx.current_samples = 0;
-        ctx.current_ptrs.clear();
-        1
-    } else {
-        -1
     }
 }
 
@@ -252,6 +175,132 @@ pub unsafe extern "C" fn wasm_decoder_get_cover_mime(
 ) -> *const c_char {
     let ctx = unsafe { &*ctx_ptr };
     ctx.cover_mime.as_ref().map_or(ptr::null(), |m| m.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasm_get_last_error() -> *const c_char {
+    LAST_ERROR.with(|e| e.borrow().as_ptr())
+}
+
+mod inner {
+    use super::{
+        AudioError,
+        AudioReader,
+        BufReader,
+        CString,
+        DecoderContext,
+        Duration,
+        JsFileAccess,
+        ResampleOptions,
+        Result,
+        SeekMode,
+    };
+
+    pub fn decoder_create(
+        file_id: u32,
+        target_sample_rate: i32,
+        target_channels: i32,
+    ) -> Result<*mut DecoderContext> {
+        let file_access = JsFileAccess::new(file_id)?;
+        let buffered_access = BufReader::with_capacity(1024 * 1024, file_access);
+        let reader = AudioReader::new(buffered_access)?;
+
+        let metadata_map = reader.metadata();
+        let metadata_json = match serde_json::to_string(&metadata_map) {
+            Ok(json) => CString::new(json).unwrap_or_default(),
+            Err(_) => {
+                return Err(AudioError::InvalidParameter(
+                    "JSON serialization failed. This is likely a bug.".to_owned(),
+                ));
+            }
+        };
+
+        let cover = reader.cover();
+        let cover_data = cover.as_ref().map_or_else(Vec::new, |c| c.data.clone());
+        let cover_mime = cover
+            .and_then(|c| c.mime_type)
+            .and_then(|m| CString::new(m).ok());
+
+        let options = ResampleOptions::new()
+            .sample_rate(target_sample_rate)
+            .channels(target_channels)
+            .format_planar::<f32>();
+
+        let resampled_reader = reader.into_resampled(options)?;
+
+        let ctx = Box::new(DecoderContext {
+            reader: resampled_reader,
+            current_samples: 0,
+            current_ptrs: Vec::with_capacity(target_channels as usize),
+            metadata_json,
+            cover_data,
+            cover_mime,
+            compute_peaks: false,
+            frame_min: 0.0,
+            frame_max: 0.0,
+        });
+
+        Ok(Box::into_raw(ctx))
+    }
+
+    pub fn decoder_decode_frame(ctx: &mut DecoderContext) -> Result<i32> {
+        loop {
+            match ctx.reader.receive_planar_as::<f32>()? {
+                Some(channels_data) => {
+                    if channels_data.is_empty() {
+                        continue;
+                    }
+
+                    let len = channels_data[0].len();
+                    if len == 0 {
+                        continue;
+                    }
+
+                    ctx.current_samples = len;
+                    ctx.current_ptrs = channels_data.iter().map(|slice| slice.as_ptr()).collect();
+
+                    if ctx.compute_peaks {
+                        let ch0 = channels_data[0];
+                        let (mut min_val, mut max_val) = (ch0[0], ch0[0]);
+
+                        for &val in ch0 {
+                            if val < min_val {
+                                min_val = val;
+                            }
+                            if val > max_val {
+                                max_val = val;
+                            }
+                        }
+                        ctx.frame_min = min_val;
+                        ctx.frame_max = max_val;
+                    } else {
+                        ctx.frame_min = 0.0;
+                        ctx.frame_max = 0.0;
+                    }
+
+                    return Ok(1);
+                }
+                None => return Ok(0),
+            }
+        }
+    }
+
+    pub fn decoder_seek(ctx: &mut DecoderContext, target_seconds: f64) -> Result<i32> {
+        if target_seconds < 0.0 {
+            return Err(AudioError::InvalidParameter(
+                "Seek target must be positive".to_string(),
+            ));
+        }
+
+        let duration = Duration::from_secs_f64(target_seconds);
+
+        ctx.reader.seek(duration, SeekMode::Accurate)?;
+
+        ctx.current_samples = 0;
+        ctx.current_ptrs.clear();
+
+        Ok(1)
+    }
 }
 
 const fn main() {}
