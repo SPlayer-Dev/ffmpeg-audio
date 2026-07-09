@@ -88,6 +88,7 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.target }}
+          components: rust-src
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux' && !matrix.cross && !matrix.llvm_mingw
