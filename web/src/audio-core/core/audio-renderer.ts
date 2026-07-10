@@ -7,12 +7,10 @@ export class AudioRenderer {
 	private gainNode: GainNode | null;
 	private _isWorkletLoaded = false;
 	private initPromise: Promise<void> | null = null;
-	private stWasmBytes: ArrayBuffer | null = null;
 
 	constructor(
 		private audioCtx: AudioContext,
 		private workletUrl: string,
-		private stWasmUrl: string,
 		gainNode?: GainNode,
 	) {
 		this.gainNode = gainNode || null;
@@ -33,11 +31,6 @@ export class AudioRenderer {
 	public async initialize(channels: number): Promise<void> {
 		if (this._isWorkletLoaded && this.workletNode) {
 			return;
-		}
-
-		if (!this.stWasmBytes) {
-			const resp = await fetch(this.stWasmUrl);
-			this.stWasmBytes = await resp.arrayBuffer();
 		}
 
 		if (!this.initPromise) {
@@ -68,14 +61,11 @@ export class AudioRenderer {
 		tempo: number,
 		pitch: number,
 		rate: number,
+		stWasmBytes: ArrayBuffer,
 	): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (!this._isWorkletLoaded || !this.workletNode) {
 				return reject(new Error("Worklet not loaded"));
-			}
-
-			if (!this.stWasmBytes) {
-				return reject(new Error("SoundTouch Wasm binary not loaded"));
 			}
 
 			const currentInitId = ++this.initCounter;
@@ -87,6 +77,11 @@ export class AudioRenderer {
 					data.payload.initId === currentInitId
 				) {
 					resolve();
+				} else if (
+					data.type === "INIT_ERROR" &&
+					data.payload.initId === currentInitId
+				) {
+					reject(new Error(`Worklet INIT failed: ${data.payload.message}`));
 				} else {
 					this.onMessage?.(data);
 				}
@@ -99,7 +94,7 @@ export class AudioRenderer {
 				payload: {
 					sharedBuffer,
 					channels,
-					wasmBytes: this.stWasmBytes,
+					wasmBytes: stWasmBytes,
 					initId: currentInitId,
 					tempo,
 					pitch,

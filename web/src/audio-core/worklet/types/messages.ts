@@ -18,4 +18,5 @@ export type WorkletCommand =
 
 export type WorkletEvent =
 	| { type: "INIT_DONE"; payload: { initId: number } }
+	| { type: "INIT_ERROR"; payload: { initId: number; message: string } }
 	| { type: "AUTO_PAUSED" };

@@ -27,6 +27,7 @@ fn main() {
         "_wasm_decoder_set_compute_peaks",
         "_wasm_decoder_get_frame_min",
         "_wasm_decoder_get_frame_max",
+        "_wasm_get_last_error",
     ];
     let exports_json = serde_json::to_string(&exports).unwrap();
 

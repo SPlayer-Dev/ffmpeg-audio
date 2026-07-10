@@ -1,5 +1,6 @@
 import "./polyfill.ts";
 import { type AudioReader, createAudioReader } from "../queue";
+import { getErrorMessage } from "../utils";
 import type { WorkletCommand, WorkletEvent } from "./types";
 import initWasm, { SoundTouchProcessor } from "./wasm/soundtouch";
 
@@ -38,27 +39,38 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 					pitch,
 					rate,
 				} = data.payload;
-				this.channels = channels;
-				this.audioReader = createAudioReader(sharedBuffer);
 
-				const wasmInstance = await initWasm({ module_or_path: wasmBytes });
-				this.wasmMemory = wasmInstance.memory;
+				try {
+					this.channels = channels;
+					this.audioReader = createAudioReader(sharedBuffer);
 
-				this.stProcessor = new SoundTouchProcessor(channels, sampleRate);
+					const wasmInstance = await initWasm({ module_or_path: wasmBytes });
+					this.wasmMemory = wasmInstance.memory;
 
-				this.stProcessor.setTempo(tempo);
-				this.stProcessor.setPitch(pitch);
-				this.stProcessor.setRate(rate);
+					this.stProcessor = new SoundTouchProcessor(channels, sampleRate);
 
-				this.currentTempo = tempo;
-				this.currentRate = rate;
+					this.stProcessor.setTempo(tempo);
+					this.stProcessor.setPitch(pitch);
+					this.stProcessor.setRate(rate);
 
-				this.inputChunkSize = this.stProcessor.getInputChunkSize();
+					this.currentTempo = tempo;
+					this.currentRate = rate;
 
-				this.postEvent({
-					type: "INIT_DONE",
-					payload: { initId },
-				});
+					this.inputChunkSize = this.stProcessor.getInputChunkSize();
+
+					this.postEvent({
+						type: "INIT_DONE",
+						payload: { initId },
+					});
+				} catch (e) {
+					this.postEvent({
+						type: "INIT_ERROR",
+						payload: {
+							initId,
+							message: getErrorMessage(e),
+						},
+					});
+				}
 			} else if (data.type === "SET_TEMPO" && this.stProcessor) {
 				this.stProcessor.setTempo(data.payload.tempo);
 				this.currentTempo = data.payload.tempo;

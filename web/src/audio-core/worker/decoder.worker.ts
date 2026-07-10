@@ -1,4 +1,5 @@
 import { type AudioWriter, createAudioWriter } from "../queue";
+import { getErrorMessage } from "../utils";
 import type { FFmpegAudioModule, WorkerCommand, WorkerEvent } from "./types";
 import createFFmpegAudio from "./wasm/ffmpeg_wasm";
 
@@ -105,7 +106,13 @@ async function processFrame() {
 			await promise;
 			if (mySessionId !== currentSessionId) return;
 		} else {
-			const status = ffmpegModule._wasm_decoder_decode_frame(decoderPtr);
+			let status = -1;
+
+			try {
+				status = ffmpegModule._wasm_decoder_decode_frame(decoderPtr);
+			} catch (wasmErr) {
+				console.warn(`Crash during frame decode: ${getErrorMessage(wasmErr)}`);
+			}
 
 			if (status === 1) {
 				const samples =
@@ -150,13 +157,14 @@ async function processFrame() {
 				checkEofDrained(mySessionId);
 				return;
 			} else {
-				isDecoding = false;
 				const rawErr = getLastErrorMsg();
-				console.error(`Decoder error during frame processing: ${rawErr}`);
-				postEvent({ type: "DECODE_ERROR", error: `Decode failed: ${rawErr}` });
-				return;
+				console.warn(`Corrupted frame skipped: ${rawErr}`);
 			}
 		}
+	} catch (globalErr) {
+		console.error("Critical error in processFrame loop:", globalErr);
+		isDecoding = false;
+		postEvent({ type: "DECODE_ERROR", error: getErrorMessage(globalErr) });
 	} finally {
 		isProcessing = false;
 
@@ -261,9 +269,9 @@ self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
 				type: "INIT_DONE",
 				payload: { duration, metadata, coverBytes, coverMime },
 			});
-		} catch (err) {
-			console.error("Worker Init Failed:", err);
-			postEvent({ type: "INIT_ERROR", error: String(err) });
+		} catch (e) {
+			console.error("Worker Init Failed:", e);
+			postEvent({ type: "INIT_ERROR", error: getErrorMessage(e) });
 		}
 	} else if (data.type === "PLAY") {
 		if (!isDecoding) {

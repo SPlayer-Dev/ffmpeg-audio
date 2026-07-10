@@ -14,7 +14,7 @@ import {
 	type PlayerCover,
 	type QueueConfig,
 } from "./types";
-import { TypedEventTarget } from "./utils";
+import { getErrorMessage, TypedEventTarget } from "./utils";
 
 const TIMEUPDATE_INTERVAL_MS = 250;
 
@@ -32,6 +32,12 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	private workerClient: DecoderWorkerClient;
 	private audioController: MainAudioController | null = null;
 	private sharedBuffer: SharedArrayBuffer | null = null;
+
+	private _assetsPreloaded = false;
+	private ffmpegWasmBlobUrl: string | null = null;
+	private soundtouchWasmBuffer: ArrayBuffer | null = null;
+	private preloadPromise: Promise<void> | null = null;
+	private abortController: AbortController | null = null;
 
 	private _state: EngineState = "idle";
 	private _duration = 0;
@@ -64,7 +70,6 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.renderer = new AudioRenderer(
 			config.audioContext,
 			config.assets.workletUrl,
-			config.assets.soundtouchWasmUrl,
 			config.gainNode,
 		);
 
@@ -211,10 +216,68 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.renderer.setRate(this._rate);
 	}
 
+	public async preloadAssets(): Promise<void> {
+		if (this._assetsPreloaded) {
+			return;
+		}
+
+		if (this.preloadPromise) {
+			return this.preloadPromise;
+		}
+
+		this.abortController = new AbortController();
+		const signal = this.abortController.signal;
+
+		this.preloadPromise = (async () => {
+			try {
+				const [ffmpegWasmBuffer, stWasmBuffer] = await Promise.all([
+					this.fetchAndValidateWasm(this.config.assets.ffmpegWasmUrl, signal),
+					this.fetchAndValidateWasm(
+						this.config.assets.soundtouchWasmUrl,
+						signal,
+					),
+					this.pingResource(this.config.assets.workerUrl, signal),
+					this.pingResource(this.config.assets.workletUrl, signal),
+				]);
+
+				const blob = new Blob([ffmpegWasmBuffer], { type: "application/wasm" });
+				this.ffmpegWasmBlobUrl = URL.createObjectURL(blob);
+
+				this.soundtouchWasmBuffer = stWasmBuffer;
+				this._assetsPreloaded = true;
+			} catch (e) {
+				if (e instanceof DOMException && e.name === "AbortError") {
+					return;
+				}
+				const msg = getErrorMessage(e);
+				this.handleError(
+					EngineErrorCode.Network,
+					`Asset preload failed: ${msg}`,
+				);
+				throw e;
+			} finally {
+				this.preloadPromise = null;
+			}
+		})();
+
+		return this.preloadPromise;
+	}
+
 	/**
 	 * Loads a file, prepares the multithreading environment, and extracts metadata.
 	 */
 	public async loadFile(file: File): Promise<void> {
+		if (!this._assetsPreloaded) {
+			await this.preloadAssets();
+		}
+
+		if (!this.ffmpegWasmBlobUrl || !this.soundtouchWasmBuffer) {
+			const msg =
+				"Assets are missing even after preload was called. Engine cannot proceed.";
+			this.handleError(EngineErrorCode.Network, msg);
+			throw new Error(msg);
+		}
+
 		const currentSessionId = ++this.loadSessionId;
 		this.reset();
 
@@ -223,46 +286,56 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		const channels = this.renderer.maxChannels;
 		const sampleRate = this.renderer.sampleRate;
 
-		await this.renderer.initialize(channels);
+		try {
+			await this.renderer.initialize(channels);
 
-		if (this.loadSessionId !== currentSessionId) {
-			return;
+			if (this.loadSessionId !== currentSessionId) {
+				return;
+			}
+
+			this.sharedBuffer = allocateAudioQueueMemory(
+				sampleRate,
+				channels,
+				this.queueConfig,
+			);
+
+			this.audioController = createMainController(this.sharedBuffer);
+
+			await this.renderer.bindQueue(
+				this.sharedBuffer,
+				channels,
+				this._tempo,
+				this._pitch,
+				this._rate,
+				this.soundtouchWasmBuffer,
+			);
+
+			if (this.loadSessionId !== currentSessionId) {
+				return;
+			}
+
+			const loadPromise = new Promise<void>((resolve, reject) => {
+				this.loadResolve = resolve;
+				this.loadReject = reject;
+			});
+
+			this.workerClient.init(
+				file,
+				sampleRate,
+				channels,
+				this.sharedBuffer,
+				this.ffmpegWasmBlobUrl,
+			);
+
+			await loadPromise;
+		} catch (e) {
+			const msg = getErrorMessage(e);
+			this.handleError(
+				EngineErrorCode.Decode,
+				`Engine initialization failed: ${msg}`,
+			);
+			throw e;
 		}
-
-		this.sharedBuffer = allocateAudioQueueMemory(
-			sampleRate,
-			channels,
-			this.queueConfig,
-		);
-
-		this.audioController = createMainController(this.sharedBuffer);
-
-		await this.renderer.bindQueue(
-			this.sharedBuffer,
-			channels,
-			this._tempo,
-			this._pitch,
-			this._rate,
-		);
-
-		if (this.loadSessionId !== currentSessionId) {
-			return;
-		}
-
-		const loadPromise = new Promise<void>((resolve, reject) => {
-			this.loadResolve = resolve;
-			this.loadReject = reject;
-		});
-
-		this.workerClient.init(
-			file,
-			sampleRate,
-			channels,
-			this.sharedBuffer,
-			this.config.assets.ffmpegWasmUrl,
-		);
-
-		await loadPromise;
 	}
 
 	public async play(): Promise<void> {
@@ -301,6 +374,10 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	}
 
 	public destroy(): void {
+		if (this.abortController) {
+			this.abortController.abort();
+			this.abortController = null;
+		}
 		this.stopTimeupdate();
 		this.workerClient.destroy();
 		this.renderer.destroyNode();
@@ -308,6 +385,12 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.audioController = null;
 		this.resetState();
 		this._state = "idle";
+		if (this.ffmpegWasmBlobUrl) {
+			URL.revokeObjectURL(this.ffmpegWasmBlobUrl);
+			this.ffmpegWasmBlobUrl = null;
+		}
+		this.soundtouchWasmBuffer = null;
+		this._assetsPreloaded = false;
 	}
 
 	private reset(): void {
@@ -322,6 +405,39 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	//#endregion
 
 	//#region Internal Callbacks & Utils
+	private async fetchAndValidateWasm(
+		url: string,
+		signal: AbortSignal,
+	): Promise<ArrayBuffer> {
+		const resp = await fetch(url, { signal });
+		if (!resp.ok) {
+			throw new Error(`HTTP ${resp.status} - ${resp.statusText}`);
+		}
+
+		const buffer = await resp.arrayBuffer();
+
+		if (buffer.byteLength < 4) {
+			throw new Error(`File too small to be a valid WASM: ${url}`);
+		}
+		const view = new DataView(buffer);
+		const magic = view.getUint32(0, false);
+		if (magic !== 0x0061736d /* \0asm */) {
+			throw new Error(
+				`Invalid WASM magic number detected. Server might have returned a 404 HTML page for: ${url}`,
+			);
+		}
+
+		return buffer;
+	}
+
+	private async pingResource(url: string, signal: AbortSignal): Promise<void> {
+		const resp = await fetch(url, { signal });
+		if (!resp.ok) {
+			throw new Error(`Failed to load resource (HTTP ${resp.status}): ${url}`);
+		}
+		await resp.arrayBuffer();
+	}
+
 	private handleWorkerInitDone(payload: {
 		duration: number;
 		metadata: Record<string, string>;
