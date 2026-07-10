@@ -27,20 +27,20 @@ export class DecoderWorkerClient {
 		sharedBuffer: SharedArrayBuffer,
 		ffmpegWasmUrl: string,
 	): void {
-		this.destroy();
+		if (!this.worker) {
+			this.worker = new Worker(this.workerUrl, { type: "module" });
 
-		this.worker = new Worker(this.workerUrl, { type: "module" });
+			this.worker.onmessage = (e: MessageEvent<WorkerEvent>) => {
+				this.handleMessage(e);
+			};
 
-		this.worker.onmessage = (e: MessageEvent<WorkerEvent>) => {
-			this.handleMessage(e);
-		};
-
-		this.worker.onerror = (e) => {
-			this.callbacks.onError(
-				EngineErrorCode.SrcNotSupported,
-				`Worker error: ${e.message}`,
-			);
-		};
+			this.worker.onerror = (e) => {
+				this.callbacks.onError(
+					EngineErrorCode.SrcNotSupported,
+					`Worker error: ${e.message}`,
+				);
+			};
+		}
 
 		this.postCommand({
 			type: "INIT",

@@ -18,7 +18,9 @@ let targetChannels = 2;
 let targetSampleRate = 48000;
 const yieldChannel = new MessageChannel();
 let isProcessing = false;
+
 let currentSeekGeneration = 0;
+let currentSessionId = 0;
 
 const WORKER_MIN_SPACE_REQ_FRAMES = 8192;
 
@@ -92,6 +94,7 @@ async function processFrame() {
 	}
 	isProcessing = true;
 	const myGeneration = currentSeekGeneration;
+	const mySessionId = currentSessionId;
 
 	try {
 		const { async, promise } = audioWriter.waitForSpaceAsync(
@@ -100,6 +103,7 @@ async function processFrame() {
 
 		if (async && promise) {
 			await promise;
+			if (mySessionId !== currentSessionId) return;
 		} else {
 			const status = ffmpegModule._wasm_decoder_decode_frame(decoderPtr);
 
@@ -116,7 +120,11 @@ async function processFrame() {
 
 				let written = 0;
 				while (written < samples) {
-					if (!isDecoding || myGeneration !== currentSeekGeneration) {
+					if (
+						!isDecoding ||
+						myGeneration !== currentSeekGeneration ||
+						mySessionId !== currentSessionId
+					) {
 						return;
 					}
 
@@ -132,13 +140,14 @@ async function processFrame() {
 						const { async, promise } = audioWriter.waitForSpaceAsync(1);
 						if (async && promise) {
 							await promise;
+							if (mySessionId !== currentSessionId) return;
 						}
 					}
 				}
 			} else if (status === 0) {
 				isDecoding = false;
 				eofPending = true;
-				checkEofDrained();
+				checkEofDrained(mySessionId);
 				return;
 			} else {
 				isDecoding = false;
@@ -151,18 +160,26 @@ async function processFrame() {
 	} finally {
 		isProcessing = false;
 
-		if (myGeneration !== currentSeekGeneration && isDecoding) {
+		if (
+			myGeneration !== currentSeekGeneration &&
+			mySessionId === currentSessionId &&
+			isDecoding
+		) {
 			processFrame();
 		}
 	}
 
-	if (isDecoding && myGeneration === currentSeekGeneration) {
+	if (
+		isDecoding &&
+		myGeneration === currentSeekGeneration &&
+		mySessionId === currentSessionId
+	) {
 		yieldChannel.port2.postMessage(null);
 	}
 }
 
-function checkEofDrained() {
-	if (!eofPending || !audioWriter) return;
+function checkEofDrained(sessionId: number) {
+	if (sessionId !== currentSessionId || !eofPending || !audioWriter) return;
 
 	const { isDrained, promise } = audioWriter.waitForDrainAsync();
 
@@ -173,9 +190,9 @@ function checkEofDrained() {
 	}
 
 	if (promise) {
-		promise.then(() => checkEofDrained());
+		promise.then(() => checkEofDrained(sessionId));
 	} else {
-		checkEofDrained();
+		checkEofDrained(sessionId);
 	}
 }
 
@@ -183,6 +200,17 @@ self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
 	const data = e.data;
 
 	if (data.type === "INIT") {
+		currentSessionId++;
+
+		if (decoderPtr !== 0 && ffmpegModule) {
+			ffmpegModule._wasm_decoder_destroy(decoderPtr);
+			decoderPtr = 0;
+		}
+
+		isDecoding = false;
+		eofPending = false;
+		audioWriter = null;
+
 		try {
 			const payload = data.payload;
 			if (payload.file.size < THRESHOLD_50MB) {

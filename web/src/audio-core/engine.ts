@@ -4,15 +4,16 @@ import {
 	createMainController,
 	type MainAudioController,
 } from "./queue";
-import type {
-	EngineConfig,
-	EngineError,
-	EngineErrorCodeValue,
-	EngineEventMap,
-	EngineState,
-	PlayerCover,
-	QueueConfig,
-} from "./types.ts";
+import {
+	type EngineConfig,
+	type EngineError,
+	EngineErrorCode,
+	type EngineErrorCodeValue,
+	type EngineEventMap,
+	type EngineState,
+	type PlayerCover,
+	type QueueConfig,
+} from "./types";
 import { TypedEventTarget } from "./utils";
 
 const TIMEUPDATE_INTERVAL_MS = 250;
@@ -47,6 +48,9 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 
 	private timeupdateTimer: ReturnType<typeof setInterval> | null = null;
 	private loadResolve: (() => void) | null = null;
+	private loadReject:
+		| ((err: { code: EngineErrorCodeValue; message: string }) => void)
+		| null = null;
 
 	constructor(config: EngineConfig) {
 		super();
@@ -212,7 +216,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 	 */
 	public async loadFile(file: File): Promise<void> {
 		const currentSessionId = ++this.loadSessionId;
-		this.destroy();
+		this.reset();
 
 		this._state = "loading";
 
@@ -233,14 +237,21 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 
 		this.audioController = createMainController(this.sharedBuffer);
 
-		await this.renderer.bindQueue(this.sharedBuffer, channels);
+		await this.renderer.bindQueue(
+			this.sharedBuffer,
+			channels,
+			this._tempo,
+			this._pitch,
+			this._rate,
+		);
 
 		if (this.loadSessionId !== currentSessionId) {
 			return;
 		}
 
-		const loadPromise = new Promise<void>((resolve) => {
+		const loadPromise = new Promise<void>((resolve, reject) => {
 			this.loadResolve = resolve;
+			this.loadReject = reject;
 		});
 
 		this.workerClient.init(
@@ -298,6 +309,16 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this.resetState();
 		this._state = "idle";
 	}
+
+	private reset(): void {
+		this.stopTimeupdate();
+		this.workerClient.pause();
+		this.audioController?.pause();
+		this.sharedBuffer = null;
+		this.audioController = null;
+		this.resetState();
+		this._state = "idle";
+	}
 	//#endregion
 
 	//#region Internal Callbacks & Utils
@@ -321,6 +342,7 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		if (this.loadResolve) {
 			this.loadResolve();
 			this.loadResolve = null;
+			this.loadReject = null;
 		}
 		this.dispatch("loadedmetadata");
 	}
@@ -336,6 +358,13 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this._error = { code, message };
 		this.stopTimeupdate();
 		this._state = "idle";
+
+		if (this.loadReject) {
+			this.loadReject({ code, message });
+			this.loadResolve = null;
+			this.loadReject = null;
+		}
+
 		this.dispatch("error", { code, message });
 	}
 
@@ -387,6 +416,15 @@ export class FFmpegAudioEngine extends TypedEventTarget<EngineEventMap> {
 		this._cover = null;
 		this._duration = 0;
 		this.baseTime = 0;
+
+		if (this.loadReject) {
+			this.loadReject({
+				code: EngineErrorCode.Aborted,
+				message: "Loading aborted by subsequent operation",
+			});
+			this.loadResolve = null;
+			this.loadReject = null;
+		}
 	}
 	//#endregion
 }

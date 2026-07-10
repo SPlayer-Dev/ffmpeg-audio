@@ -24,13 +24,35 @@ class FFmpegAudioProcessor extends AudioWorkletProcessor {
 			const data = event.data;
 
 			if (data.type === "INIT") {
-				const { sharedBuffer, channels, wasmBytes, initId } = data.payload;
+				if (this.stProcessor) {
+					this.stProcessor.free();
+					this.stProcessor = null;
+				}
+
+				const {
+					sharedBuffer,
+					channels,
+					wasmBytes,
+					initId,
+					tempo,
+					pitch,
+					rate,
+				} = data.payload;
 				this.channels = channels;
 				this.audioReader = createAudioReader(sharedBuffer);
 
 				const wasmInstance = await initWasm({ module_or_path: wasmBytes });
 				this.wasmMemory = wasmInstance.memory;
+
 				this.stProcessor = new SoundTouchProcessor(channels, sampleRate);
+
+				this.stProcessor.setTempo(tempo);
+				this.stProcessor.setPitch(pitch);
+				this.stProcessor.setRate(rate);
+
+				this.currentTempo = tempo;
+				this.currentRate = rate;
+
 				this.inputChunkSize = this.stProcessor.getInputChunkSize();
 
 				this.postEvent({

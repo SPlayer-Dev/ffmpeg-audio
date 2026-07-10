@@ -31,6 +31,10 @@ export class AudioRenderer {
 	 * Ensures the AudioWorklet module is added and the node is connected.
 	 */
 	public async initialize(channels: number): Promise<void> {
+		if (this._isWorkletLoaded && this.workletNode) {
+			return;
+		}
+
 		if (!this.stWasmBytes) {
 			const resp = await fetch(this.stWasmUrl);
 			this.stWasmBytes = await resp.arrayBuffer();
@@ -61,6 +65,9 @@ export class AudioRenderer {
 	public bindQueue(
 		sharedBuffer: SharedArrayBuffer,
 		channels: number,
+		tempo: number,
+		pitch: number,
+		rate: number,
 	): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (!this._isWorkletLoaded || !this.workletNode) {
@@ -94,6 +101,9 @@ export class AudioRenderer {
 					channels,
 					wasmBytes: this.stWasmBytes,
 					initId: currentInitId,
+					tempo,
+					pitch,
+					rate,
 				},
 			});
 		});

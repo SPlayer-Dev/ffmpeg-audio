@@ -6,6 +6,9 @@ export type WorkletCommand =
 				channels: number;
 				wasmBytes: ArrayBuffer;
 				initId: number;
+				tempo: number;
+				pitch: number;
+				rate: number;
 			};
 	  }
 	| { type: "SET_TEMPO"; payload: { tempo: number } }
