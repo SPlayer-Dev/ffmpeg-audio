@@ -268,8 +268,11 @@ if (targetOs === "windows") {
 			"iphoneos",
 			"--show-sdk-path",
 		]);
-		if (!xcrunResult.status || xcrunResult.status !== 0) {
+		if (xcrunResult.error || xcrunResult.status !== 0) {
 			console.error("错误: 无法获取 iOS SDK 路径");
+			if (xcrunResult.stderr) {
+				console.error(xcrunResult.stderr.toString());
+			}
 			process.exit(1);
 		}
 		const sysroot = xcrunResult.stdout.toString().trim();
