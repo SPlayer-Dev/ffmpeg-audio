@@ -7,9 +7,10 @@ pub use consts::*;
 /// Returns a negative error code from a POSIX error code, to return from library functions.
 #[must_use]
 pub const fn averror(e: i32) -> i32 {
-    // 这实际上是不必要的，AVERROR 的目的只是为了确保错误码为负数
-    // 我们实际上可以直接判断传入的错误码是不是负数然后进行转换
-    // 不过为了匹配 FFmpeg 原有的行为，这里还是使用 EDOM 进行判断
+    // This is actually unnecessary, as the purpose of AVERROR is simply to ensure the error code is
+    // negative. We could just check if the provided error code is negative and convert it
+    // accordingly. However, to match FFmpeg's original behavior, we still use EDOM for the
+    // check here.
     if libc::EDOM > 0 { -e } else { e }
 }
 

@@ -50,12 +50,14 @@ enum FetchAction {
     Fatal(HttpError),
 }
 
-/// An HTTP audio source that supports remote range requests and is compatible with `std::io::Read + Seek`.
+/// An HTTP audio source that supports remote range requests and is compatible with `std::io::Read +
+/// Seek`.
 pub struct HttpAudioSource {
     /// The URL of the target audio stream.
     url: String,
 
-    /// An internally reused HTTP client instance, managing the connection pool and timeout configuration.
+    /// An internally reused HTTP client instance, managing the connection pool and timeout
+    /// configuration.
     agent: Agent,
 
     /// The total size (in bytes) of the audio file, determined via server probing.
@@ -122,7 +124,8 @@ impl HttpAudioSource {
         })
     }
 
-    /// Injects an atomic boolean after initialization to interrupt blocking network operations at any time.
+    /// Injects an atomic boolean after initialization to interrupt blocking network operations at
+    /// any time.
     #[must_use]
     pub fn with_cancel_flag(mut self, flag: Arc<AtomicBool>) -> Self {
         self.cancel_flag = Some(flag);

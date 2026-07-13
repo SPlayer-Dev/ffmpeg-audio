@@ -133,10 +133,12 @@ impl SwrContext {
     /// This method is specifically designed for **Packed (Interleaved)** output formats.
     ///
     /// # Safety
-    /// * `in_data` must be a valid double pointer to the input audio data, and its
-    ///   layout must strictly match the `in_sample_fmt` and `in_layout` provided during initialization.
-    /// * `in_samples` must accurately reflect the number of samples per channel available in `in_data`.
-    /// * To flush the remaining internal buffers (EOF), `in_data` can be `null()` while `in_samples` is `0`.
+    /// * `in_data` must be a valid double pointer to the input audio data, and its layout must
+    ///   strictly match the `in_sample_fmt` and `in_layout` provided during initialization.
+    /// * `in_samples` must accurately reflect the number of samples per channel available in
+    ///   `in_data`.
+    /// * To flush the remaining internal buffers (EOF), `in_data` can be `null()` while
+    ///   `in_samples` is `0`.
     ///
     /// # Errors
     /// Returns an [`AudioError`] if the output buffer (`out_buf`) is too small to hold

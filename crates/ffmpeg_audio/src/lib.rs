@@ -119,8 +119,8 @@ impl AudioReader {
     /// allocation overhead.
     ///
     /// # Arguments
-    /// * `options` - The target `ResampleOptions` specifying the desired output
-    ///   sample rate, channel count, and data format.
+    /// * `options` - The target `ResampleOptions` specifying the desired output sample rate,
+    ///   channel count, and data format.
     ///
     /// # Returns
     /// * `Ok(Resampler)` - A fully initialized resampler ready to process frames.
@@ -286,8 +286,8 @@ impl ResampledReader {
     ///   - `true` (Packet-level scan): Rapidly reads raw packets from the demuxer without
     ///     decompressing them. Extremely fast, but relies on the container's timestamps.
     ///   - `false` (Frame-level scan): Fully decodes the audio into raw frames (equivalent to
-    ///     `ffmpeg -f null -`). This is the most accurate method, but consumes significantly
-    ///     more CPU and time.
+    ///     `ffmpeg -f null -`). This is the most accurate method, but consumes significantly more
+    ///     CPU and time.
     pub fn scan_exact_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
         let duration = self.reader.scan_exact_duration(mode)?;
         self.resampler.flush()?;

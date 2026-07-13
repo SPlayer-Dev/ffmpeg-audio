@@ -405,8 +405,8 @@ impl RawAudioBuffer {
     /// while maintaining the 8-byte alignment constraint.
     ///
     /// # Arguments
-    /// * `required_bytes` - The absolute minimum number of bytes needed for
-    ///   the upcoming FFI write operation.
+    /// * `required_bytes` - The absolute minimum number of bytes needed for the upcoming FFI write
+    ///   operation.
     pub fn reserve_bytes(&mut self, required_bytes: usize) {
         let f64_count = required_bytes.div_ceil(mem::size_of::<f64>());
         self.inner.reserve(f64_count);
@@ -433,12 +433,12 @@ impl RawAudioBuffer {
     /// # Safety
     /// This function performs unchecked type punning. The caller must guarantee
     /// all of the following:
-    /// 1. **Initialization**: C side must have successfully written valid data
-    ///    spanning at least `element_count` elements into the front of this buffer.
-    /// 2. **Type Matching**: The physical bytes written by the FFI must exactly
-    ///    match the memory layout and semantics of the requested Rust type `T`.
-    /// 3. **Bounds**: `element_count * size_of::<T>()` must not exceed the
-    ///    previously reserved capacity.
+    /// 1. **Initialization**: C side must have successfully written valid data spanning at least
+    ///    `element_count` elements into the front of this buffer.
+    /// 2. **Type Matching**: The physical bytes written by the FFI must exactly match the memory
+    ///    layout and semantics of the requested Rust type `T`.
+    /// 3. **Bounds**: `element_count * size_of::<T>()` must not exceed the previously reserved
+    ///    capacity.
     pub const unsafe fn as_typed_slice<T: AudioSample>(&self, element_count: usize) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.inner.as_ptr().cast::<T>(), element_count) }
     }

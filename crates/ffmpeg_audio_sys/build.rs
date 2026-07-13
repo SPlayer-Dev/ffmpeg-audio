@@ -58,13 +58,13 @@ mod utils {
             ("emscripten" | "wasi", "wasm32", _, _) => "build_out_emscripten_wasm32",
 
             (u_os, u_arch, u_env, u_abi) => {
-                println!("cargo:warning=[ffmpeg_audio_sys] 当前构建目标 {u_os}-{u_arch}-{u_env}-{u_abi} 不受支持");
-                println!("cargo:warning=此 Crate 未包含指定目标的编译配置，将回退到 linux_x86_64 配置");
-                println!("cargo:warning=这可能导致编译失败或意外行为");
+                println!("cargo:warning=[ffmpeg_audio_sys] Current build target {u_os}-{u_arch}-{u_env}-{u_abi} is not supported");
+                println!("cargo:warning=This crate does not contain a compilation configuration for the specified target. Falling back to the linux_x86_64 configuration");
+                println!("cargo:warning=This may result in compilation failure or unexpected behavior");
                 println!("cargo:warning=");
-                println!("cargo:warning=建议：");
-                println!("cargo:warning=  1. 设置 FFMPEG_CUSTOM_CONFIG 环境变量，提供一个精准匹配该架构的外部/内置配置目录");
-                println!("cargo:warning=  2. 放弃此 Crate 内置的 FFmpeg，使用你电脑上的 FFmpeg 开发库");
+                println!("cargo:warning=Suggestions:");
+                println!("cargo:warning=  1. Set the FFMPEG_CUSTOM_CONFIG environment variable to provide an external/internal configuration directory that exactly matches this architecture");
+                println!("cargo:warning=  2. Discard the built-in FFmpeg in this crate and use the FFmpeg development libraries on your system");
                 "build_out_linux_x86_64"
             }
         };
@@ -87,7 +87,7 @@ mod utils {
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("ZIP 条目包含非法路径: {}", entry.name()),
+                        format!("ZIP entry contains an invalid path: {}", entry.name()),
                     ));
                 }
             };
@@ -239,11 +239,11 @@ mod bundled {
 
             if !ffmpeg_dir.exists() {
                 utils::extract_zip(&slim_zip, &ffmpeg_dir)
-                    .map_err(|e| format!("解压 ffmpeg_slim.zip 失败: {e}"))?;
+                    .map_err(|e| format!("Failed to extract ffmpeg_slim.zip: {e}"))?;
             }
             if !configs_base.exists() {
                 utils::extract_zip(&configs_zip, &configs_base)
-                    .map_err(|e| format!("解压 configs.zip 失败: {e}"))?;
+                    .map_err(|e| format!("Failed to extract configs.zip: {e}"))?;
             }
             Ok((ffmpeg_dir, configs_base))
         }
@@ -261,7 +261,7 @@ mod bundled {
 
         let log_content = fs::read_to_string(&log_path).map_err(|_| {
             format!(
-                "无法读取日志文件: {}.\n请确认该目标平台的配置已包含在 configs.zip 中。",
+                "Failed to read the log file: {}.\nPlease ensure the configuration for this target platform is included in configs.zip.",
                 log_path.display()
             )
         })?;
@@ -351,10 +351,12 @@ mod bundled {
             );
         }
 
-        let bindings = builder.generate().map_err(|_| "无法生成 FFmpeg 绑定")?;
+        let bindings = builder
+            .generate()
+            .map_err(|_| "Failed to generate FFmpeg bindings")?;
         bindings
             .write_to_file(out_dir.join("bindings.rs"))
-            .map_err(|_| "无法写入 bindings.rs")?;
+            .map_err(|_| "Failed to write bindings.rs")?;
 
         Ok(())
     }
@@ -390,7 +392,9 @@ mod bundled {
             let sysroot = format!("{emsdk}/upstream/emscripten/cache/sysroot");
             builder = builder.clang_arg(format!("--sysroot={sysroot}"));
         } else {
-            println!("cargo:warning=未检测到 EMSDK 环境变量，bindgen 可能无法找到头文件");
+            println!(
+                "cargo:warning=EMSDK environment variable not detected, bindgen may fail to find header files"
+            );
         }
 
         builder
@@ -408,7 +412,7 @@ mod system {
     const REQUIRED_LIBS: [&str; 4] = ["libavcodec", "libavformat", "libavutil", "libswresample"];
 
     pub fn build(out_dir: &Path, target_os: &str) {
-        println!("cargo:warning=未找到 ffmpeg_slim.zip，正在尝试寻找已安装的 FFmpeg");
+        println!("cargo:warning=ffmpeg_slim.zip not found, attempting to find an installed FFmpeg");
         println!("cargo:rerun-if-changed=wrapper.h");
 
         let mut include_paths: Vec<PathBuf> = Vec::new();
@@ -434,7 +438,7 @@ mod system {
                 let library = pkg_config::Config::new()
                     .atleast_version("61.0")
                     .probe(lib)
-                    .unwrap_or_else(|e| panic!("未能找到 {lib}: {e} "));
+                    .unwrap_or_else(|e| panic!("Failed to find {lib}: {e} "));
                 include_paths.extend(library.include_paths);
             }
         }
@@ -448,10 +452,12 @@ mod system {
             builder = builder.clang_arg(format!("-I{}", path.display()));
         }
 
-        let bindings = builder.generate().expect("无法生成 FFmpeg 绑定");
+        let bindings = builder
+            .generate()
+            .expect("Failed to generate FFmpeg bindings");
         bindings
             .write_to_file(out_dir.join("bindings.rs"))
-            .expect("无法写入 bindings.rs");
+            .expect("Failed to write bindings.rs");
     }
 }
 
@@ -476,20 +482,22 @@ fn main() {
         }
         "bundled" => {
             if has_bundled_files {
-                bundled::build(&manifest_dir, &out_dir).expect("构建内置 FFmpeg 时出错");
+                bundled::build(&manifest_dir, &out_dir).expect("Error building built-in FFmpeg");
             } else {
                 println!(
-                    "cargo:warning=[ffmpeg_audio_sys] 未在 vendor 目录下找到 ffmpeg_slim 产物"
+                    "cargo:warning=[ffmpeg_audio_sys] ffmpeg_slim artifacts not found in the vendor directory"
                 );
-                println!("cargo:warning=已回退到尝试链接系统中的 FFmpeg");
+                println!("cargo:warning=Falling back to attempting to link the system's FFmpeg");
                 println!(
-                    "cargo:warning=如果你希望使用内置的 FFmpeg，请确保 configs.zip 和 ffmpeg_slim.zip 已存在"
+                    "cargo:warning=If you wish to use the built-in FFmpeg, please ensure configs.zip and ffmpeg_slim.zip exist"
                 );
                 system::build(&out_dir, &target_os);
             }
         }
         _ => {
-            panic!("未知的 FFMPEG_MODE: '{build_mode}'。支持的值为 'bundled' 或 'system'");
+            panic!(
+                "Unknown FFMPEG_MODE: '{build_mode}'. Supported values are 'bundled' or 'system'"
+            );
         }
     }
 }
