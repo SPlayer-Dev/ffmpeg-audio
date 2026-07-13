@@ -116,13 +116,6 @@ The output (a `.js` + `.wasm` pair) can be run with Node.js:
 node target/wasm32-unknown-emscripten/release/your_app.js
 ```
 
-## Project Structure
-
-This is a Cargo workspace containing two crates:
-
-* **`ffmpeg_audio`** — High-level Rust API for audio decoding and resampling
-* **`ffmpeg_audio_sys`** — Low-level FFI bindings to FFmpeg's C libraries
-
 ## Limitations
 
 This crate focuses solely on audio decoding. The following features are not included:
