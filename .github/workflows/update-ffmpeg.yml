@@ -43,7 +43,7 @@ jobs:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -223,7 +223,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: ffmpeg-config-*
           path: _artifacts/
@@ -250,7 +250,7 @@ jobs:
           ls -lh crates/ffmpeg_audio_sys/vendor/ffmpeg_slim.zip crates/ffmpeg_audio_sys/vendor/configs.zip
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: update/bundled-ffmpeg
