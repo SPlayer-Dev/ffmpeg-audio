@@ -1,6 +1,6 @@
 [package]
 name = "ffmpeg_audio"
-description = "High-level Rust audio processing, decoding, and resampling engine based on FFmpeg."
+description = "A lightweight FFmpeg audio decoding wrapper designed for music player applications."
 license = "GPL-3.0-only"
 repository = "https://github.com/apoint123/ffmpeg-audio"
 readme = "../../README.md"

@@ -1,6 +1,6 @@
 [package]
 name = "ffmpeg_audio_sys"
-description = "Raw FFI bindings for FFmpeg audio processing."
+description = "Raw FFmpeg FFI bindings for ffmpeg_audio."
 license = "GPL-3.0-only"
 repository = "https://github.com/apoint123/ffmpeg-audio"
 readme = "README.md"
