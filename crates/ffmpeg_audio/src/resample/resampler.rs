@@ -118,6 +118,13 @@ pub struct Resampler {
     stride_samples_per_channel: usize,
 }
 
+// SAFETY:
+// 1. FFmpeg components (`SwrContext`, `ChannelLayout`) are thread-safe and uniquely owned by
+//    `Resampler`.
+// 2. `in_ptrs_scratch` contains raw pointers, but they are transient buffers strictly scoped to
+//    `process()` and never escape the method or persist across threads.
+unsafe impl Send for Resampler {}
+
 impl Resampler {
     pub fn new(
         in_layout_ptr: &sys::AVChannelLayout,

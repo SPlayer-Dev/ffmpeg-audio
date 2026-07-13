@@ -14,6 +14,14 @@ use crate::{
 /// allocated layout data to prevent memory leaks.
 pub struct ChannelLayout(sys::AVChannelLayout);
 
+// Safety: ChannelLayout uniquely owns the underlying AVChannelLayout memory
+// (via copy/uninit matching), and FFmpeg-side allocation/deallocation is thread-safe.
+unsafe impl Send for ChannelLayout {}
+
+// Safety: Data access methods (including av_channel_layout_compare) are
+// side-effect-free, read-only on the FFmpeg side, and involve no interior mutability.
+unsafe impl Sync for ChannelLayout {}
+
 impl ChannelLayout {
     /// Creates a default channel layout based on the number of channels.
     pub fn from_default(channels: i32) -> Self {
