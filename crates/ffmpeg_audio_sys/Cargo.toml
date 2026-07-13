@@ -6,7 +6,7 @@ repository = "https://github.com/apoint123/ffmpeg-audio"
 readme = "README.md"
 keywords = ["ffmpeg", "audio", "ffi", "bindings"]
 categories = ["external-ffi-bindings", "multimedia::audio"]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [lib]
