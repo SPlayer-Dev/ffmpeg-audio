@@ -80,6 +80,22 @@ impl AudioFrame<'_> {
         unsafe { (*self.ptr.as_ptr()).sample_rate }
     }
 
+    /// Returns the Presentation Timestamp (PTS) in microseconds, if available.
+    pub(crate) fn pts_micros(&self) -> Option<i64> {
+        let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
+
+        self.time_base.calc_micros(raw_pts).map(|mut micros| {
+            let sample_rate = self.frame_sample_rate();
+
+            if self.sample_offset > 0 && sample_rate > 0 {
+                let offset_micros =
+                    (self.sample_offset as i64 * 1_000_000) / i64::from(sample_rate);
+                micros = micros.saturating_add(offset_micros);
+            }
+            micros
+        })
+    }
+
     /// Returns the Presentation Timestamp (PTS) of this frame, if available.
     ///
     /// The timestamp is automatically adjusted forward by the internal sample offset.

@@ -125,13 +125,19 @@ impl Demuxer {
             let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
             let time_base = (*stream_ptr).time_base;
 
-            let target_us = target.as_micros() as i64;
+            let target_us = i64::try_from(target.as_micros()).unwrap_or(i64::MAX);
 
-            let pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
+            let mut pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
+
+            let start_time = (*stream_ptr).start_time;
+            if start_time != sys::AV_NOPTS_VALUE {
+                pts = pts.saturating_add(start_time);
+            }
+
             let min_pts = i64::MIN;
             let max_pts = pts;
 
-            let mut ret = sys::avformat_seek_file(
+            let ret = sys::avformat_seek_file(
                 self.ctx,
                 self.audio_stream_idx as i32,
                 min_pts,
@@ -139,17 +145,6 @@ impl Demuxer {
                 max_pts,
                 sys::AVSEEK_FLAG_BACKWARD.cast_signed(),
             );
-
-            if ret < 0 {
-                ret = sys::avformat_seek_file(
-                    self.ctx,
-                    self.audio_stream_idx as i32,
-                    i64::MIN,
-                    pts,
-                    i64::MAX,
-                    sys::AVSEEK_FLAG_BYTE.cast_signed(),
-                );
-            }
 
             if ret < 0 {
                 return Err(AudioError::from_ffmpeg(ret));

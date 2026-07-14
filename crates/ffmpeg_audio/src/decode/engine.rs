@@ -187,27 +187,27 @@ impl DecodeEngine {
             return Ok(());
         }
 
-        let target_us = target.as_micros() as i64;
+        let target_us = i64::try_from(target.as_micros()).unwrap_or(i64::MAX);
 
         loop {
             match self.receive_frame() {
                 Ok(Some(frame)) => {
-                    if let Some(pts) = frame.pts() {
-                        let pts_us = pts.as_micros() as i64;
-                        let sample_rate = f64::from(frame.frame_sample_rate());
-                        let duration_us = if sample_rate > 0.0 {
-                            (frame.samples() as f64 / sample_rate * 1_000_000.0) as i64
+                    if let Some(pts_us) = frame.pts_micros() {
+                        let sample_rate = i64::from(frame.frame_sample_rate());
+
+                        let duration_us = if sample_rate > 0 {
+                            (frame.samples() as i64 * 1_000_000) / sample_rate
                         } else {
                             0
                         };
 
-                        if pts_us + duration_us >= target_us {
+                        if pts_us.saturating_add(duration_us) >= target_us {
                             let delta_us = target_us.saturating_sub(pts_us).max(0);
-                            let offset_samples = if sample_rate > 0.0 {
-                                ((delta_us as f64 * sample_rate) / 1_000_000.0).round() as usize
+                            let offset_samples = if sample_rate > 0 {
+                                ((delta_us * sample_rate) + 999_999) / 1_000_000
                             } else {
                                 0
-                            };
+                            } as usize;
 
                             if offset_samples >= frame.samples() {
                                 continue;
@@ -218,9 +218,10 @@ impl DecodeEngine {
                             break;
                         }
                     } else {
-                        self.has_buffered_seek_frame = true;
-                        self.buffered_seek_offset = 0;
-                        break;
+                        return Err(AudioError::InvalidParameter(
+                            "Cannot perform accurate seek on a stream lacking valid timestamps."
+                                .to_string(),
+                        ));
                     }
                 }
                 Ok(None) => break,
