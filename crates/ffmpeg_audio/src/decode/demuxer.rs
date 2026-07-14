@@ -64,6 +64,13 @@ impl Demuxer {
                 return Err(AudioError::from_ffmpeg(stream_idx));
             }
 
+            for i in 0..(*ctx).nb_streams {
+                let stream_ptr = *(*ctx).streams.add(i as usize);
+                if i as i32 != stream_idx {
+                    (*stream_ptr).discard = sys::AVDiscard_AVDISCARD_ALL;
+                }
+            }
+
             let packet = sys::av_packet_alloc();
             if packet.is_null() {
                 sys::avformat_close_input(&raw mut ctx);
