@@ -126,7 +126,12 @@ pub struct Resampler {
 unsafe impl Send for Resampler {}
 
 impl Resampler {
-    pub fn new(
+    /// Creates a resampler from a valid FFmpeg input layout.
+    ///
+    /// # Safety
+    /// `in_layout_ptr` must refer to a fully initialized `AVChannelLayout`; any pointer owned by
+    /// a custom layout must remain readable for the duration of this call.
+    pub unsafe fn new(
         in_layout_ptr: &sys::AVChannelLayout,
         in_sample_fmt: sys::AVSampleFormat,
         in_sample_rate: i32,
@@ -169,6 +174,8 @@ impl Resampler {
     }
 
     pub fn flush(&mut self) -> Result<()> {
+        self.actual_samples_per_channel = 0;
+        self.stride_samples_per_channel = 0;
         self.swr.flush()
     }
 
@@ -233,7 +240,7 @@ impl Resampler {
                     AudioError::AllocationFailed("Buffer size calculation overflowed".to_string())
                 })?;
 
-            self.buffer.reserve_bytes(bytes_needed);
+            self.buffer.reserve_bytes(bytes_needed)?;
 
             let out_buf_slice = self.buffer.as_uninit_bytes_mut();
             let actual_samples = if is_planar {
@@ -432,9 +439,11 @@ impl RawAudioBuffer {
     /// # Arguments
     /// * `required_bytes` - The absolute minimum number of bytes needed for the upcoming FFI write
     ///   operation.
-    pub fn reserve_bytes(&mut self, required_bytes: usize) {
+    pub fn reserve_bytes(&mut self, required_bytes: usize) -> Result<()> {
         let f64_count = required_bytes.div_ceil(mem::size_of::<f64>());
-        self.inner.reserve(f64_count);
+        self.inner
+            .try_reserve(f64_count)
+            .map_err(|e| AudioError::AllocationFailed(e.to_string()))
     }
 
     /// Exposes the entire allocated physical capacity as a mutable slice of

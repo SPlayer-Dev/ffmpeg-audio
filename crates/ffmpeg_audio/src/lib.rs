@@ -130,12 +130,15 @@ impl AudioReader {
     /// internal FFmpeg `SwrContext` allocation and initialization fail.
     pub fn build_resampler(&self, options: ResampleOptions) -> Result<Resampler> {
         let decoder = self.engine.decoder();
-        Resampler::new(
-            &decoder.channel_layout(),
-            decoder.sample_fmt(),
-            decoder.sample_rate(),
-            options,
-        )
+        // Decoder-derived FFmpeg layouts are initialized and remain valid for this call.
+        unsafe {
+            Resampler::new(
+                &decoder.channel_layout(),
+                decoder.sample_fmt(),
+                decoder.sample_rate(),
+                options,
+            )
+        }
     }
 
     /// Consumes the current [`AudioReader`] and wraps it in a [`ResampledReader`]

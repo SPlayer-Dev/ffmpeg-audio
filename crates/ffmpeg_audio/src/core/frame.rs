@@ -16,6 +16,7 @@ use crate::{
 pub struct AudioFrame<'a> {
     ptr: NonNull<sys::AVFrame>,
     time_base: TimeBase,
+    timeline_origin_pts: i64,
     sample_offset: usize,
     _marker: PhantomData<&'a mut ()>,
 }
@@ -31,6 +32,7 @@ impl AudioFrame<'_> {
         Self {
             ptr: NonNull::new(ptr.cast_mut()).expect("FFmpeg returned a null AVFrame pointer"),
             time_base,
+            timeline_origin_pts: 0,
             sample_offset: 0,
             _marker: PhantomData,
         }
@@ -39,6 +41,12 @@ impl AudioFrame<'_> {
     /// Injects a sample offset for sample-accurate seeking.
     pub(crate) const fn with_offset(mut self, offset: usize) -> Self {
         self.sample_offset = offset;
+        self
+    }
+
+    /// Defines the stream timestamp that corresponds to the public timeline origin.
+    pub(crate) const fn with_timeline_origin(mut self, origin_pts: i64) -> Self {
+        self.timeline_origin_pts = origin_pts;
         self
     }
 
@@ -80,11 +88,15 @@ impl AudioFrame<'_> {
         unsafe { (*self.ptr.as_ptr()).sample_rate }
     }
 
-    /// Returns the Presentation Timestamp (PTS) in microseconds, if available.
+    /// Returns the PTS in microseconds relative to the stream timeline origin, if available.
     pub(crate) fn pts_micros(&self) -> Option<i64> {
         let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
+        if raw_pts == sys::AV_NOPTS_VALUE {
+            return None;
+        }
+        let relative_pts = raw_pts.saturating_sub(self.timeline_origin_pts);
 
-        self.time_base.calc_micros(raw_pts).map(|mut micros| {
+        self.time_base.calc_micros(relative_pts).map(|mut micros| {
             let sample_rate = self.frame_sample_rate();
 
             if self.sample_offset > 0 && sample_rate > 0 {
@@ -96,7 +108,8 @@ impl AudioFrame<'_> {
         })
     }
 
-    /// Returns the Presentation Timestamp (PTS) of this frame, if available.
+    /// Returns the Presentation Timestamp (PTS) of this frame relative to the stream timeline
+    /// origin, if available.
     ///
     /// The timestamp is automatically adjusted forward by the internal sample offset.
     ///
@@ -106,15 +119,58 @@ impl AudioFrame<'_> {
     #[must_use]
     pub fn pts(&self) -> Option<Duration> {
         let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
+        if raw_pts == sys::AV_NOPTS_VALUE {
+            return None;
+        }
+        let relative_pts = raw_pts.saturating_sub(self.timeline_origin_pts);
 
-        self.time_base.calc_duration(raw_pts).map(|mut duration| {
-            let sample_rate = self.frame_sample_rate();
+        self.time_base
+            .calc_duration(relative_pts)
+            .map(|mut duration| {
+                let sample_rate = self.frame_sample_rate();
 
-            if self.sample_offset > 0 && sample_rate > 0 {
-                let offset_secs = self.sample_offset as f64 / f64::from(sample_rate);
-                duration += Duration::from_secs_f64(offset_secs);
-            }
-            duration
+                if self.sample_offset > 0 && sample_rate > 0 {
+                    let offset_secs = self.sample_offset as f64 / f64::from(sample_rate);
+                    duration += Duration::from_secs_f64(offset_secs);
+                }
+                duration
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        mem,
+        time::Duration,
+    };
+
+    use super::*;
+
+    #[test]
+    fn pts_is_relative_to_the_timeline_origin() {
+        let mut raw_frame = unsafe { mem::zeroed::<sys::AVFrame>() };
+        raw_frame.pts = 10_000_000;
+        raw_frame.nb_samples = 1_024;
+        raw_frame.sample_rate = 48_000;
+
+        let time_base = TimeBase::try_new(sys::AVRational {
+            num: 1,
+            den: 1_000_000,
         })
+        .unwrap();
+
+        let frame = AudioFrame::new(&raw const raw_frame, time_base)
+            .with_timeline_origin(10_000_000)
+            .with_offset(48);
+
+        assert_eq!(frame.pts_micros(), Some(1_000));
+        assert_eq!(frame.pts(), Some(Duration::from_micros(1_000)));
+
+        raw_frame.pts = sys::AV_NOPTS_VALUE;
+        let no_pts_frame =
+            AudioFrame::new(&raw const raw_frame, time_base).with_timeline_origin(-1);
+        assert_eq!(no_pts_frame.pts_micros(), None);
+        assert_eq!(no_pts_frame.pts(), None);
     }
 }

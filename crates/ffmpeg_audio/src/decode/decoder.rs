@@ -64,6 +64,10 @@ impl Decoder {
         self.frame
     }
 
+    pub const fn is_flushing(&self) -> bool {
+        self.is_flushing
+    }
+
     pub fn send_packet(&mut self, packet: *const sys::AVPacket) -> Result<()> {
         unsafe {
             sys::avcodec_send_packet(self.ctx, packet).into_ff_result()?;
@@ -82,10 +86,12 @@ impl Decoder {
         if self.is_flushing {
             return Ok(());
         }
-        self.is_flushing = true;
+
         unsafe {
             sys::avcodec_send_packet(self.ctx, ptr::null()).into_ff_result()?;
         }
+
+        self.is_flushing = true;
         Ok(())
     }
 

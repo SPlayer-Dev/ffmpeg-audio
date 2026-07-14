@@ -201,6 +201,31 @@ fn test_stream_position_resets_after_seek() {
 }
 
 #[test]
+fn test_scan_duration_resumes_after_the_current_frame() {
+    let wav_data = generate_sine_wav(1.0);
+    let mut reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+
+    let first_pts = {
+        let frame = reader.receive_frame().unwrap().unwrap();
+        frame.pts().unwrap()
+    };
+
+    reader
+        .scan_exact_duration(ffmpeg_audio::ScanMode::Frame)
+        .unwrap();
+
+    let next_pts = {
+        let frame = reader.receive_frame().unwrap().unwrap();
+        frame.pts().unwrap()
+    };
+
+    assert!(
+        next_pts > first_pts,
+        "scan 后不应重新交付已经消费的帧: first={first_pts:?}, next={next_pts:?}"
+    );
+}
+
+#[test]
 fn test_full_decode_no_panic() {
     let wav_data = generate_sine_wav(1.0);
     let reader = AudioReader::new(Cursor::new(wav_data)).unwrap();

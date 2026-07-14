@@ -127,6 +127,19 @@ impl Demuxer {
         }
     }
 
+    /// Returns the raw stream PTS corresponding to the public timeline origin.
+    pub fn timeline_origin_pts(&self) -> i64 {
+        unsafe {
+            let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
+            let start_time = (*stream_ptr).start_time;
+            if start_time == sys::AV_NOPTS_VALUE {
+                0
+            } else {
+                start_time
+            }
+        }
+    }
+
     pub fn seek_to(&mut self, target: Duration) -> Result<()> {
         unsafe {
             let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
@@ -136,10 +149,7 @@ impl Demuxer {
 
             let mut pts = sys::av_rescale_q(target_us, sys::MICROSECONDS_Q, time_base);
 
-            let start_time = (*stream_ptr).start_time;
-            if start_time != sys::AV_NOPTS_VALUE {
-                pts = pts.saturating_add(start_time);
-            }
+            pts = pts.saturating_add(self.timeline_origin_pts());
 
             let min_pts = i64::MIN;
             let max_pts = pts;
