@@ -260,9 +260,9 @@ impl DecodeEngine {
 
         self.seek(Duration::ZERO, SeekMode::Coarse)?;
 
-        let mut max_pts_us: Option<i64> = None;
-        let mut last_frame_duration_us: i64 = 0;
-        let mut total_samples_fallback: usize = 0;
+        let mut min_start_us: Option<i64> = None;
+        let mut max_end_us: Option<i64> = None;
+        let mut total_duration_us_fallback: i64 = 0;
         let mut scan_error = None;
 
         match mode {
@@ -273,14 +273,18 @@ impl DecodeEngine {
                         if pts == sys::AV_NOPTS_VALUE {
                             continue;
                         }
-                        let duration = (*packet).duration;
-                        let end_pts = if duration > 0 {
-                            pts.saturating_add(duration)
-                        } else {
-                            pts
-                        };
-                        if let Some(end_us) = self.time_base.calc_micros(end_pts) {
-                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(end_us));
+
+                        if let Some(start_us) = self.time_base.calc_micros(pts) {
+                            let duration = (*packet).duration;
+                            let end_pts = if duration > 0 {
+                                pts.saturating_add(duration)
+                            } else {
+                                pts
+                            };
+                            let end_us = self.time_base.calc_micros(end_pts).unwrap_or(start_us);
+
+                            min_start_us = Some(min_start_us.map_or(start_us, |m| m.min(start_us)));
+                            max_end_us = Some(max_end_us.map_or(end_us, |m| m.max(end_us)));
                         }
                     },
                     Ok(None) => break,
@@ -293,15 +297,21 @@ impl DecodeEngine {
             ScanMode::Frame => loop {
                 match self.receive_frame() {
                     Ok(Some(frame)) => {
-                        let samples = frame.samples();
-                        total_samples_fallback += samples;
-                        if let Some(pts) = frame.pts() {
-                            max_pts_us = Some(max_pts_us.unwrap_or(0).max(pts.as_micros() as i64));
-                        }
-                        let sample_rate = f64::from(frame.frame_sample_rate());
-                        if sample_rate > 0.0 {
-                            let duration_secs = samples as f64 / sample_rate;
-                            last_frame_duration_us = (duration_secs * 1_000_000.0) as i64;
+                        let sample_rate = i64::from(frame.frame_sample_rate());
+
+                        let frame_duration_us = if sample_rate > 0 {
+                            (frame.samples() as i64 * 1_000_000) / sample_rate
+                        } else {
+                            0
+                        };
+
+                        total_duration_us_fallback =
+                            total_duration_us_fallback.saturating_add(frame_duration_us);
+
+                        if let Some(start_us) = frame.pts_micros() {
+                            let end_us = start_us.saturating_add(frame_duration_us);
+                            min_start_us = Some(min_start_us.map_or(start_us, |m| m.min(start_us)));
+                            max_end_us = Some(max_end_us.map_or(end_us, |m| m.max(end_us)));
                         }
                     }
                     Ok(None) => break,
@@ -313,27 +323,22 @@ impl DecodeEngine {
             },
         }
 
-        self.seek(original_position, SeekMode::Accurate)?;
+        let seek_result = self.seek(original_position, SeekMode::Accurate);
 
         if let Some(e) = scan_error {
             return Err(e);
         }
+        seek_result?;
 
-        max_pts_us.map_or_else(
-            || {
-                let sample_rate = self.decoder.sample_rate();
-                if mode == ScanMode::Frame && total_samples_fallback > 0 && sample_rate > 0 {
-                    let duration_secs = total_samples_fallback as f64 / f64::from(sample_rate);
-                    Ok(Some(Duration::from_secs_f64(duration_secs)))
-                } else {
-                    Ok(None)
-                }
-            },
-            |pts| {
-                let total_us = pts.saturating_add(last_frame_duration_us);
-                Ok(Some(Duration::from_micros(total_us.max(0).cast_unsigned())))
-            },
-        )
+        if let (Some(start), Some(end)) = (min_start_us, max_end_us) {
+            let duration_us = end.saturating_sub(start).max(0).cast_unsigned();
+            Ok(Some(Duration::from_micros(duration_us)))
+        } else if mode == ScanMode::Frame && total_duration_us_fallback > 0 {
+            let safe_duration = total_duration_us_fallback.max(0).cast_unsigned();
+            Ok(Some(Duration::from_micros(safe_duration)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns a shared, immutable reference to the underlying demuxer.
