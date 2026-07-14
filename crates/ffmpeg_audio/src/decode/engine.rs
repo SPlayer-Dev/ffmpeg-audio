@@ -218,7 +218,7 @@ impl DecodeEngine {
                             break;
                         }
                     } else {
-                        return Err(AudioError::InvalidParameter(
+                        return Err(AudioError::InvalidData(
                             "Cannot perform accurate seek on a stream lacking valid timestamps."
                                 .to_string(),
                         ));

@@ -52,6 +52,12 @@ pub enum AudioError {
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
 
+    #[error("Invalid or corrupted media data encountered: {0}")]
+    InvalidData(String),
+
+    #[error("Memory allocation or layout calculation failed: {0}")]
+    AllocationFailed(String),
+
     #[error("HTTP error: {0}")]
     Http(#[from] HttpError),
 }

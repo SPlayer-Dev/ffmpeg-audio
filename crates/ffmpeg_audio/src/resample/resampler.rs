@@ -190,6 +190,9 @@ impl Resampler {
             return Err(AudioError::FormatMismatch);
         }
 
+        self.actual_samples_per_channel = 0;
+        self.stride_samples_per_channel = 0;
+
         unsafe {
             if let Some(f) = frame {
                 self.check_and_hot_reload(f)?;
@@ -217,25 +220,22 @@ impl Resampler {
             debug_assert!(in_samples_i32 >= 0, "in_samples cannot be negative.");
 
             if expected_out_samples <= 0 {
-                self.actual_samples_per_channel = 0;
                 return Ok(false);
             }
 
             let out_channels = self.options.target_channels as usize;
-            let bytes_needed = (expected_out_samples as usize) * out_channels * mem::size_of::<T>();
+
+            let expected_out_usize = expected_out_samples as usize;
+            let bytes_needed = expected_out_usize
+                .checked_mul(out_channels)
+                .and_then(|m| m.checked_mul(mem::size_of::<T>()))
+                .ok_or_else(|| {
+                    AudioError::AllocationFailed("Buffer size calculation overflowed".to_string())
+                })?;
 
             self.buffer.reserve_bytes(bytes_needed);
-            self.stride_samples_per_channel = expected_out_samples as usize;
 
             let out_buf_slice = self.buffer.as_uninit_bytes_mut();
-
-            debug_assert!(
-                out_buf_slice.len() >= bytes_needed,
-                "Rust slice length ({}) is smaller than the bytes promised to FFmpeg ({}). Buffer overflow imminent",
-                out_buf_slice.len(),
-                bytes_needed
-            );
-
             let actual_samples = if is_planar {
                 self.swr.convert_planar(
                     in_data,
@@ -248,7 +248,9 @@ impl Resampler {
                     .convert_packed(in_data, in_samples_i32, out_buf_slice)?
             };
 
+            self.stride_samples_per_channel = expected_out_usize;
             self.actual_samples_per_channel = actual_samples;
+
             Ok(self.actual_samples_per_channel > 0)
         }
     }
@@ -342,8 +344,16 @@ impl Resampler {
     ///
     /// This method should only be called immediately after `process`
     /// returns `Ok(true)`. If there is no valid data, it returns an empty slice.
+    ///
+    /// # Panics
+    /// Panics if the requested type `T` does not match the resampler's configured
+    /// packed target sample format (`T::PACKED_FORMAT`).
     #[must_use]
     pub const fn output_as<T: AudioSample>(&self) -> &[T] {
+        assert!(
+            self.options.target_sample_fmt == T::PACKED_FORMAT,
+            "Attempted to extract packed data using a type that does not match the Resampler's target format."
+        );
         if self.actual_samples_per_channel == 0 {
             return &[];
         }
@@ -358,8 +368,16 @@ impl Resampler {
     ///
     /// # Returns
     /// A `Vec` where each element is a slice representing one audio channel.
+    ///
+    /// # Panics
+    /// Panics if the requested type `T` does not match the resampler's configured
+    /// planar target sample format (`T::PLANAR_FORMAT`).
     #[must_use]
     pub fn output_planar_as<T: AudioSample>(&self) -> Vec<&[T]> {
+        assert!(
+            self.options.target_sample_fmt == T::PLANAR_FORMAT,
+            "Attempted to extract planar data using a type that does not match the Resampler's target format."
+        );
         if self.actual_samples_per_channel == 0 {
             return vec![];
         }
