@@ -189,7 +189,7 @@ impl Demuxer {
                 if is_video && is_attached_pic {
                     let pkt = &(*stream_ptr).attached_pic;
                     if pkt.data.is_null() || pkt.size <= 0 {
-                        return None;
+                        continue;
                     }
 
                     let data = std::slice::from_raw_parts(pkt.data, pkt.size as usize).to_vec();
