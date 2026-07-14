@@ -5,9 +5,26 @@ use std::{
 };
 
 use crate::{
+    AudioError,
+    AudioSample,
+    Result,
     TimeBase,
     sys,
 };
+
+/// A safe enum representing the memory layout of underlying FFmpeg PCM data.
+#[derive(Debug, Clone)]
+pub enum RawAudioData<'a, T> {
+    /// Packed (Interleaved) layout.
+    /// All channel data is interleaved in a single contiguous memory block, e.g., `[L, R, L, R, L,
+    /// R]`.
+    Packed(&'a [T]),
+
+    /// Planar layout.
+    /// Data for each channel is stored in independent, contiguous memory blocks, e.g., `[L, L, L]`
+    /// and `[R, R, R]`. The length of the outer Vec represents the number of channels.
+    Planar(Vec<&'a [T]>),
+}
 
 /// A safe, zero-copy wrapper around FFmpeg's raw `AVFrame`.
 ///
@@ -21,7 +38,7 @@ pub struct AudioFrame<'a> {
     _marker: PhantomData<&'a mut ()>,
 }
 
-impl AudioFrame<'_> {
+impl<'a> AudioFrame<'a> {
     /// Creates a new `AudioFrame` wrapper.
     ///
     /// # Safety
@@ -135,6 +152,57 @@ impl AudioFrame<'_> {
                 }
                 duration
             })
+    }
+
+    /// Zero-copy extraction of raw PCM audio data directly from the underlying FFmpeg AVFrame.
+    ///
+    /// # Returns
+    /// * `Ok(RawAudioData)` - The corresponding memory slice enum.
+    /// * `Err(AudioError::FormatMismatch)` - The requested `T` does not match the type actually
+    ///   output by the underlying decoder.
+    pub fn raw_data<T: AudioSample>(&self) -> Result<RawAudioData<'a, T>> {
+        let fmt = self.sample_fmt();
+        let is_packed = fmt == T::PACKED_FORMAT;
+        let is_planar = fmt == T::PLANAR_FORMAT;
+
+        if !is_packed && !is_planar {
+            return Err(AudioError::FormatMismatch);
+        }
+
+        let logical_samples = self.samples();
+        let channels = unsafe { (*self.ptr.as_ptr()).ch_layout.nb_channels } as usize;
+        let offset = self.offset();
+        let extended_data = unsafe { (*self.ptr.as_ptr()).extended_data };
+
+        if logical_samples == 0 || extended_data.is_null() {
+            return if is_packed {
+                Ok(RawAudioData::Packed(&[]))
+            } else {
+                Ok(RawAudioData::Planar(vec![&[]; channels]))
+            };
+        }
+
+        if is_packed {
+            unsafe {
+                let base_ptr = (*extended_data).cast::<T>();
+                let adjusted_ptr = base_ptr.add(offset * channels);
+                let slice = std::slice::from_raw_parts(adjusted_ptr, logical_samples * channels);
+
+                Ok(RawAudioData::Packed(slice))
+            }
+        } else {
+            let mut planes = Vec::with_capacity(channels);
+            unsafe {
+                for ch in 0..channels {
+                    let base_ptr = (*extended_data.add(ch)).cast::<T>();
+                    let adjusted_ptr = base_ptr.add(offset);
+                    let slice = std::slice::from_raw_parts(adjusted_ptr, logical_samples);
+
+                    planes.push(slice);
+                }
+            }
+            Ok(RawAudioData::Planar(planes))
+        }
     }
 }
 

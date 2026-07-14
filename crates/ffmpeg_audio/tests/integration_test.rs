@@ -5,6 +5,7 @@ use std::{
 
 use ffmpeg_audio::{
     AudioReader,
+    RawAudioData,
     ResampleOptions,
     SeekMode,
 };
@@ -419,6 +420,79 @@ fn test_planar_format_mismatch_rejection_planar_to_packed() {
     );
 }
 
+#[test]
+fn test_raw_data_extraction_packed_and_type_safety() {
+    let wav_data = generate_sine_wav(0.1);
+    let mut reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+
+    let channels = reader.source_info().channels as usize;
+
+    let frame = reader.receive_frame().unwrap().expect("应能读取到 WAV 帧");
+
+    let err_result = frame.raw_data::<f32>();
+    assert!(
+        matches!(err_result, Err(ffmpeg_audio::AudioError::FormatMismatch)),
+        "期望类型不匹配错误，但得到了: {err_result:?}"
+    );
+
+    let raw = frame.raw_data::<i16>().expect("提取 i16 原始数据失败");
+
+    match raw {
+        RawAudioData::Packed(data) => {
+            let expected_len = frame.samples() * channels;
+
+            assert_eq!(
+                data.len(),
+                expected_len,
+                "Packed 切片的元素总数 ({}) 应等于逻辑样本数 ({}) 乘以声道数 ({})",
+                data.len(),
+                frame.samples(),
+                channels
+            );
+
+            let has_signal = data.iter().any(|&s| s != 0);
+            assert!(has_signal, "捞出的原始 PCM 不应全为静音");
+        }
+        RawAudioData::Planar(_) => panic!("WAV 应该被解码为 Packed 布局，却得到了 Planar"),
+    }
+}
+
+#[test]
+fn test_raw_data_signal_integrity_across_frames() {
+    let sample_rate = 44100;
+    let freq: f32 = 440.0;
+    let duration = 0.1;
+
+    let wav_data = generate_sine_wav(duration);
+    let mut reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+
+    let mut global_sample_index = 0;
+
+    while let Some(frame) = reader.receive_frame().unwrap() {
+        let raw = frame.raw_data::<i16>().expect("提取 i16 失败");
+
+        if let RawAudioData::Packed(data) = raw {
+            for &actual_sample in data {
+                let t = global_sample_index as f32 / sample_rate as f32;
+                let expected_sample =
+                    (f32::sin(2.0 * std::f32::consts::PI * freq * t) * 16000.0) as i16;
+
+                let diff = (i32::from(actual_sample) - i32::from(expected_sample)).abs();
+                assert!(
+                    diff <= 1,
+                    "信号失真！在全局样本索引 {global_sample_index} 期望 {expected_sample}, 实际得到 {actual_sample}"
+                );
+
+                global_sample_index += 1;
+            }
+        } else {
+            panic!("WAV 应为 Packed 格式");
+        }
+    }
+
+    assert_eq!(global_sample_index, 4410, "解码出的样本总数不对");
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod file_tests {
     use std::fs::File;
@@ -494,5 +568,46 @@ mod file_tests {
             total_samples > 0,
             "Should have successfully decoded mutated stream"
         );
+    }
+
+    #[test]
+    fn test_raw_data_extraction_planar_with_seek_offset() {
+        let file = File::open(AAC_SEEK_PATH).expect("Failed to open AAC test asset");
+        let mut reader = AudioReader::new(file).unwrap();
+
+        let expected_channels = reader.source_info().channels as usize;
+
+        let target = Duration::from_millis(501);
+        reader.seek(target, SeekMode::Accurate).unwrap();
+
+        let frame = reader.receive_frame().unwrap().expect("Seek 后读取帧失败");
+
+        assert!(frame.samples() > 0, "修剪后应仍有剩余数据");
+
+        let raw = frame.raw_data::<f32>().expect("提取 f32 原始数据失败");
+
+        match raw {
+            RawAudioData::Planar(planes) => {
+                assert_eq!(
+                    planes.len(),
+                    expected_channels,
+                    "返回的平面切片数量 ({}) 应等于文件的物理声道数 ({})",
+                    planes.len(),
+                    expected_channels
+                );
+
+                for (ch_idx, plane) in planes.iter().enumerate() {
+                    assert_eq!(
+                        plane.len(),
+                        frame.samples(),
+                        "声道 {ch_idx} 的切片长度未与修剪后的样本数对齐"
+                    );
+
+                    let has_signal = plane.iter().any(|&s| s.abs() > 0.0);
+                    assert!(has_signal, "提取出来的声道 {ch_idx} 数据异常");
+                }
+            }
+            RawAudioData::Packed(_) => panic!("AAC 应该被解码为 Planar 布局，却得到了 Packed"),
+        }
     }
 }

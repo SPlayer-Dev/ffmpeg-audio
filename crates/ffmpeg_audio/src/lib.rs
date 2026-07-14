@@ -8,7 +8,10 @@ pub mod resample;
 pub use core::http::HttpAudioSource;
 pub use core::{
     format::AudioSample,
-    frame::AudioFrame,
+    frame::{
+        AudioFrame,
+        RawAudioData,
+    },
     info::SourceAudioInfo,
     time::TimeBase,
 };
