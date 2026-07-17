@@ -501,6 +501,7 @@ mod file_tests {
 
     const AAC_SEEK_PATH: &str = "tests/assets/seek_test.aac";
     const MUTATION_AAC_PATH: &str = "tests/assets/format_mutation.aac";
+    const NEGATIVE_PTS_MKV_PATH: &str = "tests/assets/negative_pts.mkv";
 
     #[test]
     fn test_seek_accuracy() {
@@ -609,5 +610,40 @@ mod file_tests {
             }
             RawAudioData::Packed(_) => panic!("AAC 应该被解码为 Planar 布局，却得到了 Packed"),
         }
+    }
+
+    #[test]
+    fn test_blocks_negative_pts_from_raw_container() {
+        // ffmpeg -f lavfi -i "aevalsrc=sin(440*2*PI*t):s=48000:d=1" -c:a pcm_s16le
+        // -output_ts_offset -0.1 -avoid_negative_ts disabled -y negative_pts.mkv
+        let file = std::fs::File::open(NEGATIVE_PTS_MKV_PATH).unwrap();
+        let mut reader = AudioReader::new(file).unwrap();
+
+        let mut total_samples = 0;
+        let mut first_frame_pts = None;
+
+        while let Some(frame) = reader.receive_frame().unwrap() {
+            if first_frame_pts.is_none() {
+                first_frame_pts = frame.pts();
+
+                assert_eq!(
+                    first_frame_pts.unwrap().as_millis(),
+                    0,
+                    "First output frame is not aligned to 0ms"
+                );
+            }
+            total_samples += frame.samples();
+        }
+
+        // 1. The MKV container timebase is 1/1000s (millisecond precision).
+        // 2. 1024 samples per packet at 48kHz (approx. 21.33ms).
+        // 3. After millisecond quantization, the PTS of the 5th packet is marked as -15ms.
+        // 4. Remove the first 4 packets (4096) and the first 15ms of the 5th packet (720 samples),
+        //    totaling 4816 samples removed.
+        // 5. The final remaining valid sample count is 43184.
+        assert_eq!(
+            total_samples, 43_184,
+            "Should trim exactly 0.1s of negative PTS data. Expected 43184 samples, got {total_samples}"
+        );
     }
 }

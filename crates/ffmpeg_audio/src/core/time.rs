@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::{
     AudioError,
     Result,
@@ -48,31 +46,11 @@ impl TimeBase {
     /// The resulting value **can be negative** if the frame represents
     /// encoder delay or padding before the physical start of the track (0.0s).
     #[must_use]
-    pub fn calc_micros(self, pts: i64) -> Option<i64> {
+    pub(crate) fn calc_micros(self, pts: i64) -> Option<i64> {
         if pts == sys::AV_NOPTS_VALUE {
             return None;
         }
 
         unsafe { Some(sys::av_rescale_q(pts, self.0, sys::MICROSECONDS_Q)) }
-    }
-
-    /// Converts a PTS into a `Duration`.
-    ///
-    /// This method is for high-level business logic, UI progress bars,
-    /// or playback synchronization where time must be positive.
-    ///
-    /// # Returns
-    /// - `Some(Duration)` representing the clamped physical playback time.
-    /// - `None` if the provided PTS is invalid (`sys::AV_NOPTS_VALUE`).
-    ///
-    /// # Note
-    /// If the underlying physical time evaluates to a negative value, it is
-    /// clamped to `Duration::ZERO`.
-    #[must_use]
-    pub fn calc_duration(self, pts: i64) -> Option<Duration> {
-        self.calc_micros(pts).map(|micros| {
-            let safe_micros = micros.max(0) as u64;
-            Duration::from_micros(safe_micros)
-        })
     }
 }

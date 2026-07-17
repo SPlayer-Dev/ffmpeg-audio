@@ -105,6 +105,37 @@ impl<'a> AudioFrame<'a> {
         unsafe { (*self.ptr.as_ptr()).sample_rate }
     }
 
+    /// Converts a time span in microseconds to the corresponding number of samples based on the
+    /// current frame sample rate
+    pub(crate) fn calc_samples(&self, micros: i64) -> usize {
+        let sample_rate = i64::from(self.frame_sample_rate());
+
+        if sample_rate > 0 && micros > 0 {
+            let samples_i64 = ((micros * sample_rate) + 999_999) / 1_000_000;
+            samples_i64 as usize
+        } else {
+            0
+        }
+    }
+
+    /// Returns the exact physical duration of this frame in microseconds.
+    pub(crate) fn duration_micros(&self) -> i64 {
+        let sample_rate = i64::from(self.frame_sample_rate());
+        if sample_rate > 0 {
+            (self.samples() as i64 * 1_000_000) / sample_rate
+        } else {
+            0
+        }
+    }
+
+    /// Returns the physical end time of this frame in microseconds.
+    ///
+    /// Returns None if the frame lacks a valid start PTS.
+    pub(crate) fn end_micros(&self) -> Option<i64> {
+        self.pts_micros()
+            .map(|start| start.saturating_add(self.duration_micros()))
+    }
+
     /// Returns the PTS in microseconds relative to the stream timeline origin, if available.
     pub(crate) fn pts_micros(&self) -> Option<i64> {
         let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
@@ -125,6 +156,12 @@ impl<'a> AudioFrame<'a> {
         })
     }
 
+    /// Returns the precise playback duration of this audio frame.
+    #[must_use]
+    pub fn duration(&self) -> Duration {
+        Duration::from_micros(self.duration_micros().cast_unsigned())
+    }
+
     /// Returns the Presentation Timestamp (PTS) of this frame relative to the stream timeline
     /// origin, if available.
     ///
@@ -135,23 +172,8 @@ impl<'a> AudioFrame<'a> {
     /// - `None` if the underlying frame lacks a valid PTS (`AV_NOPTS_VALUE`).
     #[must_use]
     pub fn pts(&self) -> Option<Duration> {
-        let raw_pts = unsafe { (*self.ptr.as_ptr()).pts };
-        if raw_pts == sys::AV_NOPTS_VALUE {
-            return None;
-        }
-        let relative_pts = raw_pts.saturating_sub(self.timeline_origin_pts);
-
-        self.time_base
-            .calc_duration(relative_pts)
-            .map(|mut duration| {
-                let sample_rate = self.frame_sample_rate();
-
-                if self.sample_offset > 0 && sample_rate > 0 {
-                    let offset_secs = self.sample_offset as f64 / f64::from(sample_rate);
-                    duration += Duration::from_secs_f64(offset_secs);
-                }
-                duration
-            })
+        self.pts_micros()
+            .map(|micros| Duration::from_micros(micros.max(0).cast_unsigned()))
     }
 
     /// Zero-copy extraction of raw PCM audio data directly from the underlying FFmpeg AVFrame.
@@ -213,6 +235,8 @@ mod tests {
         time::Duration,
     };
 
+    use ffmpeg_audio_sys::MICROSECONDS_Q;
+
     use super::*;
 
     #[test]
@@ -222,12 +246,7 @@ mod tests {
         raw_frame.nb_samples = 1_024;
         raw_frame.sample_rate = 48_000;
 
-        let time_base = TimeBase::try_new(sys::AVRational {
-            num: 1,
-            den: 1_000_000,
-        })
-        .unwrap();
-
+        let time_base = TimeBase::try_new(MICROSECONDS_Q).unwrap();
         let frame = AudioFrame::new(&raw const raw_frame, time_base)
             .with_timeline_origin(10_000_000)
             .with_offset(48);
@@ -240,5 +259,46 @@ mod tests {
             AudioFrame::new(&raw const raw_frame, time_base).with_timeline_origin(-1);
         assert_eq!(no_pts_frame.pts_micros(), None);
         assert_eq!(no_pts_frame.pts(), None);
+    }
+
+    #[test]
+    fn test_frame_time_boundary_calculations() {
+        let mut raw_frame = unsafe { mem::zeroed::<sys::AVFrame>() };
+        raw_frame.pts = 10_000;
+        raw_frame.nb_samples = 480;
+        raw_frame.sample_rate = 48_000;
+
+        let time_base = TimeBase::try_new(MICROSECONDS_Q).unwrap();
+        let frame = AudioFrame::new(&raw const raw_frame, time_base).with_timeline_origin(0);
+
+        assert_eq!(frame.duration_micros(), 10_000);
+        assert_eq!(frame.end_micros(), Some(20_000));
+    }
+
+    #[test]
+    fn test_calc_samples_for_micros_with_ceiling() {
+        let mut raw_frame = unsafe { mem::zeroed::<sys::AVFrame>() };
+        raw_frame.sample_rate = 44_100;
+        let time_base = TimeBase::try_new(sys::AVRational { num: 1, den: 1 }).unwrap();
+        let frame = AudioFrame::new(&raw const raw_frame, time_base);
+
+        assert_eq!(frame.calc_samples(1_000_000), 44_100);
+        assert_eq!(frame.calc_samples(1), 1);
+        assert_eq!(frame.calc_samples(12), 1);
+    }
+
+    #[test]
+    fn test_frame_fallback_on_invalid_sample_rate() {
+        let mut raw_frame = unsafe { mem::zeroed::<sys::AVFrame>() };
+        raw_frame.nb_samples = 1024;
+        raw_frame.pts = 1000;
+        raw_frame.sample_rate = 0;
+
+        let time_base = TimeBase::try_new(MICROSECONDS_Q).unwrap();
+        let frame = AudioFrame::new(&raw const raw_frame, time_base);
+
+        assert_eq!(frame.duration_micros(), 0);
+        assert_eq!(frame.end_micros(), Some(1000));
+        assert_eq!(frame.calc_samples(5_000_000), 0);
     }
 }

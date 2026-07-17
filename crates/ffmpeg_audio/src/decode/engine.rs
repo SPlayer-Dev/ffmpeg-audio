@@ -149,10 +149,33 @@ impl DecodeEngine {
         loop {
             match self.decoder.receive_frame() {
                 Ok(Some(frame)) => {
-                    let audio_frame = AudioFrame::new(frame, self.time_base)
+                    let mut audio_frame = AudioFrame::new(frame, self.time_base)
                         .with_timeline_origin(self.timeline_origin_pts);
-                    self.current_pts = audio_frame.pts();
 
+                    if let (Some(start_us), Some(end_us)) =
+                        (audio_frame.pts_micros(), audio_frame.end_micros())
+                    {
+                        if end_us <= 0 {
+                            #[cfg(feature = "tracing")]
+                            tracing::debug!(
+                                "Dropped preroll frame (start: {start_us} us, end: {end_us} us)"
+                            );
+                            continue;
+                        }
+
+                        if start_us < 0 && audio_frame.offset() == 0 {
+                            let delta_us = 0 - start_us;
+                            let offset_samples = audio_frame.calc_samples(delta_us);
+
+                            if offset_samples < audio_frame.samples() {
+                                audio_frame = audio_frame.with_offset(offset_samples);
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+
+                    self.current_pts = audio_frame.pts();
                     self.debug_verify();
                     return Ok(Some(audio_frame));
                 }
@@ -209,21 +232,10 @@ impl DecodeEngine {
             match self.receive_frame() {
                 Ok(Some(frame)) => {
                     if let Some(pts_us) = frame.pts_micros() {
-                        let sample_rate = i64::from(frame.frame_sample_rate());
-
-                        let duration_us = if sample_rate > 0 {
-                            (frame.samples() as i64 * 1_000_000) / sample_rate
-                        } else {
-                            0
-                        };
-
-                        if pts_us.saturating_add(duration_us) >= target_us {
+                        if pts_us.saturating_add(frame.duration_micros()) >= target_us {
                             let delta_us = target_us.saturating_sub(pts_us).max(0);
-                            let offset_samples = if sample_rate > 0 {
-                                ((delta_us * sample_rate) + 999_999) / 1_000_000
-                            } else {
-                                0
-                            } as usize;
+
+                            let offset_samples = frame.calc_samples(delta_us);
 
                             if offset_samples >= frame.samples() {
                                 continue;
@@ -268,17 +280,10 @@ impl DecodeEngine {
         let frame_ptr = self.decoder.current_frame();
         let frame = AudioFrame::new(frame_ptr, self.time_base)
             .with_timeline_origin(self.timeline_origin_pts);
-        let sample_rate = frame.frame_sample_rate();
 
-        frame.pts().map_or(Duration::ZERO, |pts| {
-            if sample_rate > 0 {
-                let frame_duration_us =
-                    (frame.samples() as u64).saturating_mul(1_000_000) / sample_rate as u64;
-                pts.saturating_add(Duration::from_micros(frame_duration_us))
-            } else {
-                pts
-            }
-        })
+        frame
+            .pts()
+            .map_or(Duration::ZERO, |pts| pts.saturating_add(frame.duration()))
     }
 
     /// Scans the audio stream to determine its exact total duration.
@@ -325,8 +330,12 @@ impl DecodeEngine {
                             };
                             let end_us = self.time_base.calc_micros(end_pts).unwrap_or(start_us);
 
-                            min_start_us = Some(min_start_us.map_or(start_us, |m| m.min(start_us)));
-                            max_end_us = Some(max_end_us.map_or(end_us, |m| m.max(end_us)));
+                            let safe_start = start_us.max(0);
+                            let safe_end = end_us.max(0);
+
+                            min_start_us =
+                                Some(min_start_us.map_or(safe_start, |m| m.min(safe_start)));
+                            max_end_us = Some(max_end_us.map_or(safe_end, |m| m.max(safe_end)));
                         }
                     },
                     Ok(None) => break,
@@ -339,19 +348,12 @@ impl DecodeEngine {
             ScanMode::Frame => loop {
                 match self.receive_frame() {
                     Ok(Some(frame)) => {
-                        let sample_rate = i64::from(frame.frame_sample_rate());
-
-                        let frame_duration_us = if sample_rate > 0 {
-                            (frame.samples() as i64 * 1_000_000) / sample_rate
-                        } else {
-                            0
-                        };
-
                         total_duration_us_fallback =
-                            total_duration_us_fallback.saturating_add(frame_duration_us);
+                            total_duration_us_fallback.saturating_add(frame.duration_micros());
 
-                        if let Some(start_us) = frame.pts_micros() {
-                            let end_us = start_us.saturating_add(frame_duration_us);
+                        if let (Some(start_us), Some(end_us)) =
+                            (frame.pts_micros(), frame.end_micros())
+                        {
                             min_start_us = Some(min_start_us.map_or(start_us, |m| m.min(start_us)));
                             max_end_us = Some(max_end_us.map_or(end_us, |m| m.max(end_us)));
                         }

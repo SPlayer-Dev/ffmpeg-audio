@@ -135,7 +135,7 @@ impl Demuxer {
             if start_time == sys::AV_NOPTS_VALUE {
                 0
             } else {
-                start_time
+                start_time.max(0)
             }
         }
     }
