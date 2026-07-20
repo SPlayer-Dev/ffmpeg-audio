@@ -10,7 +10,7 @@ version = "0.1.2"
 edition = "2024"
 
 [features]
-default = ["tracing"]
+default = []
 tracing = ["dep:tracing"]
 http = ["dep:tokio", "dep:tokio-util", "dep:reqwest", "dep:futures-util"]
 
