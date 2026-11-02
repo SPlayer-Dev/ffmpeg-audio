@@ -18,6 +18,7 @@ use std::{
 use futures_util::TryStreamExt;
 use reqwest::{
     Client,
+    Proxy,
     StatusCode,
     header,
 };
@@ -133,6 +134,22 @@ impl From<&Self> for HttpCancelHandle {
     }
 }
 
+/// Proxy policy for the HTTP client used by [`HttpAudioSource`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum HttpProxy {
+    /// Use the proxy from the environment (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`)
+    /// and, on Windows and macOS, the system proxy settings.
+    #[default]
+    System,
+
+    /// Connect directly, ignoring environment variables and system proxy settings.
+    Direct,
+
+    /// Route all requests through the given proxy URL (`http://`, `https://`, `socks5://` or
+    /// `socks5h://`).
+    Url(String),
+}
+
 /// An HTTP audio source that supports remote range requests and is compatible with `std::io::Read +
 /// Seek`.
 pub struct HttpAudioSource {
@@ -219,6 +236,26 @@ impl HttpAudioSource {
     /// * The total stream length cannot be determined.
     /// * A transport or connection error occurs during the initial network probe.
     pub fn new_with_cancel_handle(url: &str, handle: impl Into<HttpCancelHandle>) -> Result<Self> {
+        Self::new_with_proxy(url, handle, &HttpProxy::System)
+    }
+
+    /// Same as [`Self::new_with_cancel_handle`], but with an explicit proxy policy.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The URL of the target remote audio stream.
+    /// * `handle` - An opaque cancellation handle ([`HttpCancelHandle`]) or reference to it.
+    /// * `proxy` - The proxy policy for all requests made by this source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the proxy URL is invalid, or for any reason listed in
+    /// [`Self::new_with_cancel_handle`].
+    pub fn new_with_proxy(
+        url: &str,
+        handle: impl Into<HttpCancelHandle>,
+        proxy: &HttpProxy,
+    ) -> Result<Self> {
         let handle = handle.into();
         let rt = Builder::new_multi_thread()
             .worker_threads(1)
@@ -226,8 +263,14 @@ impl HttpAudioSource {
             .build()
             .map_err(|e| HttpError::Transport(e.to_string()))?;
 
-        let client = Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
+        let builder = Client::builder().connect_timeout(CONNECT_TIMEOUT);
+        let builder = match proxy {
+            HttpProxy::System => builder,
+            HttpProxy::Direct => builder.no_proxy(),
+            HttpProxy::Url(proxy_url) => builder
+                .proxy(Proxy::all(proxy_url).map_err(|e| HttpError::Transport(e.to_string()))?),
+        };
+        let client = builder
             .build()
             .map_err(|e| HttpError::Transport(e.to_string()))?;
 
@@ -843,6 +886,42 @@ mod tests {
         let mut eof_buf = vec![0u8; 10];
         let eof_n = source.read(&mut eof_buf).unwrap();
         assert_eq!(eof_n, 0, "Should return 0 at EOF");
+    }
+
+    #[test]
+    fn test_explicit_proxy_routes_requests() {
+        use std::{
+            io::{
+                BufRead,
+                BufReader,
+                Write,
+            },
+            net::TcpListener,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy = HttpProxy::Url(format!("http://{}", listener.local_addr().unwrap()));
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(&stream).read_line(&mut request_line).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+            request_line
+        });
+
+        let url = "http://audio.invalid/a.mp3";
+        let result = HttpAudioSource::new_with_proxy(url, HttpCancelHandle::new(), &proxy);
+        assert!(result.is_err());
+        assert!(server.join().unwrap().starts_with(&format!("GET {url} ")));
+    }
+
+    #[test]
+    fn test_invalid_proxy_url() {
+        let proxy = HttpProxy::Url("not a url".into());
+        let result = HttpAudioSource::new_with_proxy(TEST_URL, HttpCancelHandle::new(), &proxy);
+        assert!(matches!(result, Err(AudioError::Http(HttpError::Transport(_)))));
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod resample;
 pub use core::http::{
     HttpAudioSource,
     HttpCancelHandle,
+    HttpProxy,
 };
 pub use core::{
     format::AudioSample,
